@@ -1,0 +1,4 @@
+account,stock_symbol,transaction_type,quantity,price,transaction_date,fees,notes
+My Account,AAPL,BUY,10,150.50,2024-01-15,5.00,Sample transaction
+My Account,GOOGL,BUY,5,2800.00,2024-01-20,10.00,
+Another Account,MSFT,SELL,3,380.25,2024-02-01,3.50,Partial sale

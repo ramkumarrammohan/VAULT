@@ -46,7 +46,18 @@ const refreshPrice = async (id: number, symbol: string) => {
     await priceApi.updatePrice(symbol)
     await loadStocks()
   } catch (err: any) {
-    error.value = err.response?.data?.error || `Failed to update price for ${symbol}`
+    const errorData = err.response?.data
+
+    // If it's a 429 rate limit error, show a less alarming message
+    if (err.response?.status === 429) {
+      alert(`Unable to fetch live price for ${symbol}\n\n${errorData?.error || 'Yahoo Finance is temporarily unavailable.'}\n\nYou can continue using the existing price shown in the table.`)
+    } else {
+      if (errorData?.hint) {
+        error.value = `${errorData.error}\n${errorData.hint}`
+      } else {
+        error.value = errorData?.error || `Failed to update price for ${symbol}`
+      }
+    }
     console.error('Error updating price:', err)
   } finally {
     refreshingStocks.value.delete(id)
@@ -66,16 +77,24 @@ const goToEdit = (id: number) => {
 }
 
 const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'INR',
     minimumFractionDigits: 2
   }).format(value)
 }
 
 const formatDate = (dateString: string | undefined) => {
-  if (!dateString) return 'N/A'
-  return new Date(dateString).toLocaleDateString()
+  if (!dateString) return 'Never'
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`
+  return date.toLocaleDateString()
 }
 
 onMounted(() => {

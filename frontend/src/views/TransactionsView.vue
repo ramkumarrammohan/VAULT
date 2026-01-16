@@ -14,6 +14,12 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 const showAddModal = ref(false)
+const showBulkUploadModal = ref(false)
+const csvFile = ref<File | null>(null)
+const csvData = ref<any[]>([])
+const csvErrors = ref<string[]>([])
+const uploadLoading = ref(false)
+
 const formData = ref({
   account_id: null as number | null,
   stock_id: null as number | null,
@@ -166,15 +172,166 @@ const submitAndReset = async () => {
 }
 
 const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'INR',
     minimumFractionDigits: 2
   }).format(value)
 }
 
 const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleString()
+}
+
+const openBulkUploadModal = () => {
+  csvFile.value = null
+  csvData.value = []
+  csvErrors.value = []
+  showBulkUploadModal.value = true
+}
+
+const handleFileSelect = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+
+  if (file) {
+    if (!file.name.endsWith('.csv')) {
+      csvErrors.value = ['Please select a CSV file']
+      return
+    }
+    csvFile.value = file
+    parseCSV(file)
+  }
+}
+
+const parseCSV = (file: File) => {
+  const reader = new FileReader()
+
+  reader.onload = (e) => {
+    try {
+      const text = e.target?.result as string
+      const lines = text.split('\n').filter(line => line.trim())
+
+      if (lines.length < 2) {
+        csvErrors.value = ['CSV file must contain header and at least one data row']
+        return
+      }
+
+      // Parse header
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+
+      // Validate required columns
+      const requiredColumns = ['account', 'stock_symbol', 'transaction_type', 'quantity', 'price', 'transaction_date']
+      const missingColumns = requiredColumns.filter(col => !headers.includes(col))
+
+      if (missingColumns.length > 0) {
+        csvErrors.value = [`Missing required columns: ${missingColumns.join(', ')}`]
+        return
+      }
+
+      // Parse data rows
+      const parsed: any[] = []
+      const errors: string[] = []
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim())
+        const row: any = {}
+
+        headers.forEach((header, index) => {
+          row[header] = values[index] || ''
+        })
+
+        // Find account by name
+        const account = accounts.value.find(a => a.name.toLowerCase() === row.account.toLowerCase())
+        if (!account) {
+          errors.push(`Row ${i}: Account "${row.account}" not found`)
+          continue
+        }
+
+        // Find stock by symbol
+        const stock = stocks.value.find(s => s.symbol.toUpperCase() === row.stock_symbol.toUpperCase())
+        if (!stock) {
+          errors.push(`Row ${i}: Stock "${row.stock_symbol}" not found`)
+          continue
+        }
+
+        // Validate transaction type
+        const transType = row.transaction_type.toUpperCase()
+        if (transType !== 'BUY' && transType !== 'SELL') {
+          errors.push(`Row ${i}: Invalid transaction type "${row.transaction_type}"`)
+          continue
+        }
+
+        parsed.push({
+          account_id: account.id,
+          account_name: account.name,
+          stock_id: stock.id,
+          stock_symbol: stock.symbol,
+          transaction_type: transType,
+          quantity: parseFloat(row.quantity),
+          price: parseFloat(row.price),
+          fees: row.fees ? parseFloat(row.fees) : 0,
+          transaction_date: row.transaction_date,
+          notes: row.notes || ''
+        })
+      }
+
+      csvData.value = parsed
+      csvErrors.value = errors
+
+    } catch (err: any) {
+      csvErrors.value = ['Failed to parse CSV file: ' + err.message]
+    }
+  }
+
+  reader.onerror = () => {
+    csvErrors.value = ['Failed to read file']
+  }
+
+  reader.readAsText(file)
+}
+
+const submitBulkTransactions = async () => {
+  if (csvData.value.length === 0) {
+    error.value = 'No valid transactions to upload'
+    return
+  }
+
+  uploadLoading.value = true
+  error.value = null
+
+  try {
+    console.log('Sending bulk transactions:', csvData.value)
+    const response = await transactionApi.createBulk({
+      transactions: csvData.value
+    })
+
+    showBulkUploadModal.value = false
+    await loadTransactions()
+
+    // Show success message
+    const successMsg = `Successfully uploaded ${response.data.success_count} transactions`
+    const errorMsg = response.data.error_count > 0 ? `, ${response.data.error_count} failed` : ''
+    alert(successMsg + errorMsg)
+
+  } catch (err: any) {
+    console.error('Error uploading transactions:', err)
+    console.error('Error response:', err.response?.data)
+    error.value = err.response?.data?.error || 'Failed to upload transactions'
+  } finally {
+    uploadLoading.value = false
+  }
+}
+
+const downloadTemplate = () => {
+  const template = 'account,stock_symbol,transaction_type,quantity,price,transaction_date,fees,notes\nMy Account,AAPL,BUY,10,150.50,2024-01-15,5.00,Sample transaction'
+  const blob = new Blob([template], { type: 'text/csv' })
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'transactions_template.csv'
+  a.click()
+  window.URL.revokeObjectURL(url)
 }
 
 onMounted(async () => {
@@ -188,7 +345,10 @@ onMounted(async () => {
   <div class="transactions-page">
     <div class="header">
       <h1>Transaction History</h1>
-      <button @click="openAddModal" class="btn-primary">Add Transaction</button>
+      <div class="header-actions">
+        <button @click="openBulkUploadModal" class="btn-secondary">Bulk Upload (CSV)</button>
+        <button @click="openAddModal" class="btn-primary">Add Transaction</button>
+      </div>
     </div>
 
     <div class="filter-section">
@@ -371,6 +531,87 @@ onMounted(async () => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Bulk Upload Modal -->
+    <div v-if="showBulkUploadModal" class="modal-overlay" @click.self="showBulkUploadModal = false">
+      <div class="modal-content large-modal">
+        <h2>Bulk Upload Transactions from CSV</h2>
+
+        <div class="upload-info">
+          <p>Upload a CSV file with your transactions. The file should have the following columns:</p>
+          <p><strong>account, stock_symbol, transaction_type, quantity, price, transaction_date, fees (optional), notes (optional)</strong></p>
+          <button @click="downloadTemplate" class="btn-link">Download CSV Template</button>
+        </div>
+
+        <div class="file-upload-section">
+          <input
+            type="file"
+            accept=".csv"
+            @change="handleFileSelect"
+            id="csv-file"
+            class="file-input"
+          />
+          <label for="csv-file" class="file-label">
+            {{ csvFile ? csvFile.name : 'Choose CSV file...' }}
+          </label>
+        </div>
+
+        <div v-if="csvErrors.length > 0" class="error-list">
+          <h4>Errors:</h4>
+          <ul>
+            <li v-for="(err, idx) in csvErrors" :key="idx">{{ err }}</li>
+          </ul>
+        </div>
+
+        <div v-if="csvData.length > 0" class="preview-section">
+          <h3>Preview ({{ csvData.length }} transactions)</h3>
+          <div class="preview-table-container">
+            <table class="preview-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Stock</th>
+                  <th>Type</th>
+                  <th>Quantity</th>
+                  <th>Price</th>
+                  <th>Fees</th>
+                  <th>Date</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in csvData" :key="idx">
+                  <td>{{ item.account_name }}</td>
+                  <td>{{ item.stock_symbol }}</td>
+                  <td>
+                    <span :class="['type-badge', item.transaction_type === 'BUY' ? 'buy' : 'sell']">
+                      {{ item.transaction_type }}
+                    </span>
+                  </td>
+                  <td>{{ item.quantity }}</td>
+                  <td>{{ formatCurrency(item.price) }}</td>
+                  <td>{{ formatCurrency(item.fees) }}</td>
+                  <td>{{ item.transaction_date }}</td>
+                  <td>{{ item.notes || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" @click="showBulkUploadModal = false" class="btn-secondary">Cancel</button>
+          <button
+            type="button"
+            @click="submitBulkTransactions"
+            class="btn-primary"
+            :disabled="csvData.length === 0 || uploadLoading"
+          >
+            {{ uploadLoading ? 'Uploading...' : `Upload ${csvData.length} Transactions` }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -634,4 +875,124 @@ h1 {
   justify-content: flex-end;
   margin-top: 1.5rem;
 }
+
+.header-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.large-modal {
+  max-width: 1000px;
+}
+
+.upload-info {
+  background-color: #f8f9fa;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1.5rem;
+}
+
+.upload-info p {
+  margin: 0.5rem 0;
+  color: #666;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #3498db;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.btn-link:hover {
+  color: #2980b9;
+}
+
+.file-upload-section {
+  margin-bottom: 1.5rem;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-label {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background-color: #3498db;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.file-label:hover {
+  background-color: #2980b9;
+}
+
+.error-list {
+  background-color: #fee;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1.5rem;
+}
+
+.error-list h4 {
+  margin: 0 0 0.5rem 0;
+  color: #c00;
+}
+
+.error-list ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: #c00;
+}
+
+.preview-section {
+  margin-bottom: 1.5rem;
+}
+
+.preview-section h3 {
+  margin: 0 0 1rem 0;
+  color: #2c3e50;
+}
+
+.preview-table-container {
+  max-height: 400px;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.preview-table th {
+  background-color: #f5f5f5;
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+  color: #2c3e50;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+}
+
+.preview-table tbody tr:hover {
+  background-color: #f9f9f9;
+}
 </style>
+

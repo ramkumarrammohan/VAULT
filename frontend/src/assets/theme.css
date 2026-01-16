@@ -1,0 +1,117 @@
+/* Global theme styles that components can use */
+
+/* Page containers - applies to all main page sections */
+.accounts-page,
+.dashboard,
+.stocks-page,
+.transactions-page,
+.stock-form,
+.holding-form,
+.account-form {
+  background: var(--bg-primary) !important;
+}
+
+/* Card/Container styles */
+.card,
+.modal-content,
+.form-container,
+.account-card,
+.stocks-table-container,
+.transactions-table-container,
+.holdings-section {
+  background: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Text styles */
+h1, h2, h3, h4, h5, h6, p, label, td, th, span {
+  color: var(--text-primary) !important;
+}
+
+.description, .text-secondary {
+  color: var(--text-secondary) !important;
+}
+
+/* Input styles */
+input, select, textarea {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-secondary) !important;
+}
+
+/* Table styles */
+table {
+  background: var(--bg-secondary) !important;
+}
+
+thead,
+.stocks-table th,
+.transactions-table th,
+.holdings-table th {
+  background-color: var(--bg-tertiary) !important;
+}
+
+tbody tr:hover {
+  background-color: var(--table-hover) !important;
+}
+
+td, th {
+  border-color: var(--border-light) !important;
+}
+
+/* Table cell strong text (stock names) */
+.stocks-table td strong,
+.holdings-table td strong {
+  color: var(--text-primary) !important;
+}
+
+/* Table cell small text */
+.holdings-table td small {
+  color: var(--text-secondary) !important;
+}
+
+/* Transaction type badges - keep light theme colors for visibility */
+.type-badge.buy {
+  background-color: #d4edda !important;
+  color: #155724 !important;
+}
+
+.type-badge.sell {
+  background-color: #f8d7da !important;
+  color: #721c24 !important;
+}
+
+/* Modal styles */
+.modal-overlay {
+  background-color: var(--modal-overlay) !important;
+}
+
+/* Error/Success messages */
+.error-message, .error-list {
+  background-color: var(--error-bg) !important;
+  color: var(--error-text) !important;
+}
+
+/* Filter section */
+.filter-section {
+  background: var(--bg-secondary) !important;
+}
+
+/* Upload info */
+.upload-info {
+  background-color: var(--bg-tertiary) !important;
+}
+
+/* Preview section */
+.preview-table-container {
+  border-color: var(--border-color) !important;
+}
+
+/* Empty state and loading */
+.empty-state, .loading {
+  color: var(--text-secondary) !important;
+}
