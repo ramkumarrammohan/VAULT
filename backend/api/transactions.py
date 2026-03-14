@@ -43,8 +43,8 @@ def create_transaction():
         return jsonify({'error': 'account_id, stock_id, transaction_type, quantity, price, and transaction_date are required'}), 400
     
     # Validate transaction type
-    if data['transaction_type'] not in ['BUY', 'SELL']:
-        return jsonify({'error': 'transaction_type must be either BUY or SELL'}), 400
+    if data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER']:
+        return jsonify({'error': 'transaction_type must be BUY, SELL, SPLIT, or DEMERGER'}), 400
     
     # Verify account and stock exist
     account = Account.query.get(data['account_id'])
@@ -72,7 +72,9 @@ def create_transaction():
         price=data['price'],
         transaction_date=transaction_date,
         fees=data.get('fees', 0),
-        notes=data.get('notes')
+        notes=data.get('notes'),
+        demerger_source_stock_id=data.get('demerger_source_stock_id'),
+        demerger_ratio=data.get('demerger_ratio')
     )
     
     db.session.add(transaction)
@@ -87,12 +89,83 @@ def update_transaction(transaction_id):
     transaction = Transaction.query.get_or_404(transaction_id)
     data = request.get_json()
     
-    # Note: Updating transactions is tricky as it affects holdings
-    # For MVP, allow updating only notes and fees
-    if 'notes' in data:
-        transaction.notes = data['notes']
+    # Allow updating all transaction fields
+    if 'account_id' in data:
+        account = Account.query.get(data['account_id'])
+        if not account:
+            return jsonify({'error': 'Account not found'}), 404
+        transaction.account_id = data['account_id']
+    
+    if 'stock_id' in data:
+        stock = Stock.query.get(data['stock_id'])
+        if not stock:
+            return jsonify({'error': 'Stock not found'}), 404
+        transaction.stock_id = data['stock_id']
+    
+    if 'transaction_type' in data:
+        if data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER']:
+            return jsonify({'error': 'transaction_type must be BUY, SELL, SPLIT, or DEMERGER'}), 400
+        transaction.transaction_type = data['transaction_type']
+    
+    if 'quantity' in data:
+        transaction.quantity = data['quantity']
+    
+    if 'price' in data:
+        transaction.price = data['price']
+    
+    if 'transaction_date' in data:
+        try:
+            if isinstance(data['transaction_date'], str):
+                date_str = data['transaction_date'].strip()
+                transaction_date = None
+                
+                # Try multiple date formats
+                date_formats = [
+                    '%d-%m-%Y',
+                    '%Y-%m-%d',
+                    '%m/%d/%Y',
+                    '%d/%m/%Y',
+                    '%Y-%m-%dT%H:%M:%S',
+                    '%Y-%m-%d %H:%M:%S',
+                ]
+                
+                for fmt in date_formats:
+                    try:
+                        transaction_date = datetime.strptime(date_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                
+                if transaction_date is None:
+                    try:
+                        transaction_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    except:
+                        pass
+                
+                if transaction_date is None:
+                    return jsonify({'error': 'Invalid transaction_date format'}), 400
+                    
+                transaction.transaction_date = transaction_date
+            else:
+                transaction.transaction_date = data['transaction_date']
+        except (ValueError, AttributeError) as e:
+            return jsonify({'error': f'Invalid transaction_date: {str(e)}'}), 400
+    
     if 'fees' in data:
         transaction.fees = data['fees']
+    
+    if 'notes' in data:
+        transaction.notes = data['notes']
+    
+    if 'demerger_source_stock_id' in data:
+        if data['demerger_source_stock_id']:
+            source_stock = Stock.query.get(data['demerger_source_stock_id'])
+            if not source_stock:
+                return jsonify({'error': 'Source stock not found'}), 404
+        transaction.demerger_source_stock_id = data['demerger_source_stock_id']
+    
+    if 'demerger_ratio' in data:
+        transaction.demerger_ratio = data['demerger_ratio']
     
     db.session.commit()
     return jsonify(transaction.to_dict())
@@ -160,10 +233,10 @@ def create_bulk_transactions():
                 continue
             
             # Validate transaction type
-            if trans_data['transaction_type'] not in ['BUY', 'SELL']:
+            if trans_data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER']:
                 errors.append({
                     'row': idx + 1,
-                    'error': 'transaction_type must be either BUY or SELL'
+                    'error': 'transaction_type must be BUY, SELL, SPLIT, or DEMERGER'
                 })
                 continue
             
@@ -234,7 +307,9 @@ def create_bulk_transactions():
                 price=trans_data['price'],
                 transaction_date=transaction_date,
                 fees=trans_data.get('fees', 0),
-                notes=trans_data.get('notes')
+                notes=trans_data.get('notes'),
+                demerger_source_stock_id=trans_data.get('demerger_source_stock_id'),
+                demerger_ratio=trans_data.get('demerger_ratio')
             )
             
             db.session.add(transaction)

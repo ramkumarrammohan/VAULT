@@ -1,12 +1,36 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { portfolioApi, holdingApi, priceApi } from '@/services/api'
-import type { PortfolioSummary, Holding } from '@/types'
+import { ref, computed, onMounted } from 'vue'
+import { portfolioApi, holdingApi, priceApi, accountApi, stockApi } from '@/services/api'
+import type { PortfolioSummary, Holding, Account, Stock } from '@/types'
 
 const summary = ref<PortfolioSummary | null>(null)
 const holdings = ref<Holding[]>([])
+const accounts = ref<Account[]>([])
+const stocks = ref<Stock[]>([])
+const selectedAccountId = ref<number | null>(null)
+const selectedStockId = ref<number | null>(null)
+const sortBy = ref<string>('stock_symbol')
+const sortDirection = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const updating = ref(false)
+
+const loadAccounts = async () => {
+  try {
+    const response = await accountApi.getAll()
+    accounts.value = response.data
+  } catch (error) {
+    console.error('Error loading accounts:', error)
+  }
+}
+
+const loadStocks = async () => {
+  try {
+    const response = await stockApi.getAll()
+    stocks.value = response.data
+  } catch (error) {
+    console.error('Error loading stocks:', error)
+  }
+}
 
 const loadData = async () => {
   loading.value = true
@@ -50,7 +74,88 @@ const getGainLossClass = (value: number) => {
   return 'neutral'
 }
 
+const filteredHoldings = computed(() => {
+  let filtered = holdings.value
+
+  if (selectedAccountId.value) {
+    filtered = filtered.filter(h => h.account_id === selectedAccountId.value)
+  }
+
+  if (selectedStockId.value) {
+    filtered = filtered.filter(h => h.stock_id === selectedStockId.value)
+  }
+
+  return filtered
+})
+
+const sortedHoldings = computed(() => {
+  const sorted = [...filteredHoldings.value]
+
+  sorted.sort((a, b) => {
+    let aVal: any
+    let bVal: any
+
+    switch (sortBy.value) {
+      case 'stock_symbol':
+        aVal = a.stock_symbol.toLowerCase()
+        bVal = b.stock_symbol.toLowerCase()
+        break
+      case 'account_name':
+        aVal = a.account_name.toLowerCase()
+        bVal = b.account_name.toLowerCase()
+        break
+      case 'quantity':
+        aVal = a.quantity
+        bVal = b.quantity
+        break
+      case 'average_price':
+        aVal = a.average_price
+        bVal = b.average_price
+        break
+      case 'current_price':
+        aVal = a.current_price || 0
+        bVal = b.current_price || 0
+        break
+      case 'invested_value':
+        aVal = a.invested_value
+        bVal = b.invested_value
+        break
+      case 'current_value':
+        aVal = a.current_value
+        bVal = b.current_value
+        break
+      case 'gain_loss':
+        aVal = a.gain_loss
+        bVal = b.gain_loss
+        break
+      case 'gain_loss_percentage':
+        aVal = a.gain_loss_percentage
+        bVal = b.gain_loss_percentage
+        break
+      default:
+        return 0
+    }
+
+    if (aVal < bVal) return sortDirection.value === 'asc' ? -1 : 1
+    if (aVal > bVal) return sortDirection.value === 'asc' ? 1 : -1
+    return 0
+  })
+
+  return sorted
+})
+
+const setSortBy = (column: string) => {
+  if (sortBy.value === column) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = column
+    sortDirection.value = 'asc'
+  }
+}
+
 onMounted(() => {
+  loadAccounts()
+  loadStocks()
   loadData()
 })
 </script>
@@ -93,6 +198,29 @@ onMounted(() => {
       <!-- Holdings Table -->
       <div class="holdings-section">
         <h2>Your Holdings</h2>
+
+        <!-- Filter Section -->
+        <div class="filter-section">
+          <div class="filter-group">
+            <label for="account-filter">Filter by Account:</label>
+            <select id="account-filter" v-model.number="selectedAccountId">
+              <option :value="null">All Accounts</option>
+              <option v-for="account in accounts" :key="account.id" :value="account.id">
+                {{ account.name }}
+              </option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="stock-filter">Filter by Stock:</label>
+            <select id="stock-filter" v-model.number="selectedStockId">
+              <option :value="null">All Stocks</option>
+              <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+                {{ stock.symbol }} - {{ stock.name }}
+              </option>
+            </select>
+          </div>
+        </div>
+
         <div v-if="holdings.length === 0" class="empty-state">
           <p>No holdings yet. Start by adding some stocks!</p>
           <router-link to="/holdings/add" class="btn-primary">Add Holding</router-link>
@@ -100,18 +228,58 @@ onMounted(() => {
         <table v-else class="holdings-table">
           <thead>
             <tr>
-              <th>Stock</th>
-              <th>Account</th>
-              <th>Quantity</th>
-              <th>Avg Price</th>
-              <th>Current Price</th>
-              <th>Invested</th>
-              <th>Current Value</th>
-              <th>Gain/Loss</th>
+              <th @click="setSortBy('stock_symbol')" class="sortable">
+                Stock
+                <span class="sort-indicator" v-if="sortBy === 'stock_symbol'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('account_name')" class="sortable">
+                Account
+                <span class="sort-indicator" v-if="sortBy === 'account_name'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('quantity')" class="sortable">
+                Quantity
+                <span class="sort-indicator" v-if="sortBy === 'quantity'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('average_price')" class="sortable">
+                Avg Price
+                <span class="sort-indicator" v-if="sortBy === 'average_price'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('current_price')" class="sortable">
+                Current Price
+                <span class="sort-indicator" v-if="sortBy === 'current_price'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('invested_value')" class="sortable">
+                Invested
+                <span class="sort-indicator" v-if="sortBy === 'invested_value'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('current_value')" class="sortable">
+                Current Value
+                <span class="sort-indicator" v-if="sortBy === 'current_value'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
+              <th @click="setSortBy('gain_loss')" class="sortable">
+                Gain/Loss
+                <span class="sort-indicator" v-if="sortBy === 'gain_loss'">
+                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="holding in holdings" :key="holding.id">
+            <tr v-for="holding in sortedHoldings" :key="holding.id">
               <td>
                 <strong>{{ holding.stock_symbol }}</strong>
                 <br />
@@ -235,6 +403,34 @@ h1 {
   color: #2c3e50;
 }
 
+.filter-section {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.filter-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-section label {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.filter-section select {
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
 .empty-state {
   text-align: center;
   padding: 3rem;
@@ -264,6 +460,23 @@ h1 {
   color: #2c3e50;
   font-size: 0.9rem;
   text-transform: uppercase;
+}
+
+.holdings-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.holdings-table th.sortable:hover {
+  background-color: #e8e8e8;
+}
+
+.sort-indicator {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  color: #42b983;
 }
 
 .holdings-table tbody tr:hover {

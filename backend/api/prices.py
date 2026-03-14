@@ -36,7 +36,7 @@ def update_stock_price(symbol):
             seconds_remaining = int(COOLDOWN_SECONDS - time_since_update.total_seconds())
             return jsonify({
                 'error': f'Stock price was updated recently. Please wait {seconds_remaining} seconds.',
-                'last_updated': stock.last_updated.isoformat(),
+                'last_updated': stock.last_updated.isoformat() + 'Z',
                 'current_price': stock.current_price
             }), 429
     
@@ -47,7 +47,7 @@ def update_stock_price(symbol):
         if time_since_last < COOLDOWN_SECONDS:
             return jsonify({
                 'error': f'Please wait {int(COOLDOWN_SECONDS - time_since_last)} seconds before updating this stock again.',
-                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None,
+                'last_updated': stock.last_updated.isoformat() + 'Z' if stock.last_updated else None,
                 'current_price': stock.current_price
             }), 429
     
@@ -66,14 +66,14 @@ def update_stock_price(symbol):
             return jsonify({
                 'symbol': stock.symbol,
                 'current_price': stock.current_price,
-                'last_updated': stock.last_updated.isoformat()
+                'last_updated': stock.last_updated.isoformat() + 'Z'
             })
         else:
             return jsonify({
                 'error': f'Could not fetch current price for {symbol}. The stock symbol may be invalid or temporarily unavailable.',
                 'hint': 'Verify the symbol is correct for NSE stocks (e.g., RELIANCE.NS)',
                 'current_price': stock.current_price,
-                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None
+                'last_updated': stock.last_updated.isoformat() + 'Z' if stock.last_updated else None
             }), 404
             
     except Exception as e:
@@ -85,19 +85,19 @@ def update_stock_price(symbol):
                 'error': 'Yahoo Finance rate limit reached. Please wait a few minutes before trying again.',
                 'hint': 'Try refreshing individual stocks with longer intervals between requests.',
                 'current_price': stock.current_price,
-                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None
+                'last_updated': stock.last_updated.isoformat() + 'Z' if stock.last_updated else None
             }), 429
         elif 'HTTPError' in error_msg or 'Connection' in error_msg or 'Timeout' in error_msg:
             return jsonify({
                 'error': 'Unable to connect to Yahoo Finance. Please check your internet connection and try again.',
                 'current_price': stock.current_price,
-                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None
+                'last_updated': stock.last_updated.isoformat() + 'Z' if stock.last_updated else None
             }), 503
         else:
             return jsonify({
                 'error': f'Failed to fetch stock price: {error_msg}',
                 'current_price': stock.current_price,
-                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None
+                'last_updated': stock.last_updated.isoformat() + 'Z' if stock.last_updated else None
             }), 500
 
 

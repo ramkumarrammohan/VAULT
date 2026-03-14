@@ -18,7 +18,16 @@ class Stock(db.Model):
     
     # Relationships
     holdings = db.relationship('Holding', backref='stock', lazy=True, cascade='all, delete-orphan')
-    transactions = db.relationship('Transaction', backref='stock', lazy=True, cascade='all, delete-orphan')
+    transactions = db.relationship('Transaction', 
+                                   foreign_keys='Transaction.stock_id',
+                                   backref='stock', 
+                                   lazy=True, 
+                                   cascade='all, delete-orphan')
+    # Transactions where this stock was the demerger source
+    demerger_transactions = db.relationship('Transaction',
+                                           foreign_keys='Transaction.demerger_source_stock_id',
+                                           backref='demerger_source_stock',
+                                           lazy=True)
     
     def to_dict(self):
         """Convert model to dictionary"""
@@ -29,8 +38,8 @@ class Stock(db.Model):
             'exchange': self.exchange,
             'sector': self.sector,
             'current_price': self.current_price,
-            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'last_updated': self.last_updated.isoformat() + 'Z' if self.last_updated else None,
+            'created_at': self.created_at.isoformat() + 'Z' if self.created_at else None
         }
     
     def __repr__(self):

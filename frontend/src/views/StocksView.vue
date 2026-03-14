@@ -86,7 +86,9 @@ const formatCurrency = (value: number) => {
 
 const formatDate = (dateString: string | undefined) => {
   if (!dateString) return 'Never'
-  const date = new Date(dateString)
+  // Ensure the date string is treated as UTC
+  const dateStr = dateString.endsWith('Z') ? dateString : dateString + 'Z'
+  const date = new Date(dateStr)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)

@@ -43,6 +43,16 @@ def calculate_holdings_from_transactions():
                 holding['total_invested'] -= holding['total_invested'] * sell_ratio
                 holding['quantity'] -= trans.quantity
                 holding['total_fees'] += trans.fees
+        elif trans.transaction_type == 'SPLIT':
+            # Stock split/bonus shares - increase quantity but no investment cost
+            holding['quantity'] += trans.quantity
+            # No change to total_invested (no money spent)
+        elif trans.transaction_type == 'DEMERGER':
+            # Demerger - new stock received from parent company
+            # Add the demerged stock to holdings (quantity received)
+            holding['quantity'] += trans.quantity
+            # Investment is allocated from source stock based on ratio
+            # For simplicity, treating as zero-cost basis unless specified
     
     # Convert to list and add calculated fields
     holdings_list = []

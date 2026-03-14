@@ -43,8 +43,8 @@ class Holding(db.Model):
             'gain_loss': round(gain_loss, 2),
             'gain_loss_percentage': round(gain_loss_percentage, 2),
             'notes': self.notes,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'created_at': self.created_at.isoformat() + 'Z' if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() + 'Z' if self.updated_at else None
         }
     
     def __repr__(self):

@@ -14,21 +14,25 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 const showAddModal = ref(false)
+const showEditModal = ref(false)
 const showBulkUploadModal = ref(false)
 const csvFile = ref<File | null>(null)
 const csvData = ref<any[]>([])
 const csvErrors = ref<string[]>([])
 const uploadLoading = ref(false)
+const editingTransactionId = ref<number | null>(null)
 
 const formData = ref({
   account_id: null as number | null,
   stock_id: null as number | null,
-  transaction_type: 'BUY' as 'BUY' | 'SELL',
+  transaction_type: 'BUY' as 'BUY' | 'SELL' | 'SPLIT' | 'DEMERGER',
   quantity: null as number | null,
   price: null as number | null,
   transaction_date: new Date().toISOString().slice(0, 16),
   fees: 0,
-  notes: ''
+  notes: '',
+  demerger_source_stock_id: null as number | null,
+  demerger_ratio: null as number | null
 })
 
 const loadAccounts = async () => {
@@ -69,6 +73,42 @@ const loadTransactions = async () => {
   }
 }
 
+const openEditModal = (transaction: Transaction) => {
+  editingTransactionId.value = transaction.id
+  formData.value = {
+    account_id: transaction.account_id,
+    stock_id: transaction.stock_id,
+    transaction_type: transaction.transaction_type,
+    quantity: transaction.quantity,
+    price: transaction.price,
+    transaction_date: new Date(transaction.transaction_date).toISOString().slice(0, 16),
+    fees: transaction.fees || 0,
+    notes: transaction.notes || '',
+    demerger_source_stock_id: (transaction as any).demerger_source_stock_id || null,
+    demerger_ratio: (transaction as any).demerger_ratio || null
+  }
+  showEditModal.value = true
+}
+
+const updateTransaction = async () => {
+  if (!editingTransactionId.value) return
+
+  loading.value = true
+  error.value = null
+
+  try {
+    await transactionApi.update(editingTransactionId.value, formData.value)
+    showEditModal.value = false
+    editingTransactionId.value = null
+    await loadTransactions()
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Failed to update transaction'
+    console.error('Error updating transaction:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
 const deleteTransaction = async (id: number) => {
   if (!confirm('Are you sure you want to delete this transaction? This will reverse its effect on the holding.')) {
     return
@@ -92,14 +132,27 @@ const openAddModal = () => {
     price: null,
     transaction_date: new Date().toISOString().slice(0, 16),
     fees: 0,
-    notes: ''
+    notes: '',
+    demerger_source_stock_id: null,
+    demerger_ratio: null
   }
   showAddModal.value = true
 }
 
 const submitTransaction = async () => {
-  if (!formData.value.account_id || !formData.value.stock_id || !formData.value.quantity || !formData.value.price) {
+  if (!formData.value.account_id || !formData.value.stock_id || !formData.value.quantity) {
     error.value = 'Please fill all required fields'
+    return
+  }
+
+  // Price is required for BUY/SELL but can be 0 for SPLIT/DEMERGER
+  if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
+    error.value = 'Price is required for BUY/SELL transactions'
+    return
+  }
+
+  if (formData.value.price === null || formData.value.price === undefined) {
+    error.value = 'Please enter a price'
     return
   }
 
@@ -115,7 +168,9 @@ const submitTransaction = async () => {
       price: formData.value.price,
       transaction_date: formData.value.transaction_date,
       fees: formData.value.fees || 0,
-      notes: formData.value.notes || undefined
+      notes: formData.value.notes || undefined,
+      demerger_source_stock_id: formData.value.demerger_source_stock_id || undefined,
+      demerger_ratio: formData.value.demerger_ratio || undefined
     })
     showAddModal.value = false
     await loadTransactions()
@@ -128,8 +183,19 @@ const submitTransaction = async () => {
 }
 
 const submitAndReset = async () => {
-  if (!formData.value.account_id || !formData.value.stock_id || !formData.value.quantity || !formData.value.price) {
+  if (!formData.value.account_id || !formData.value.stock_id || !formData.value.quantity) {
     error.value = 'Please fill all required fields'
+    return
+  }
+
+  // Price is required for BUY/SELL but can be 0 for SPLIT/DEMERGER
+  if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
+    error.value = 'Price is required for BUY/SELL transactions'
+    return
+  }
+
+  if (formData.value.price === null || formData.value.price === undefined) {
+    error.value = 'Please enter a price'
     return
   }
 
@@ -145,7 +211,9 @@ const submitAndReset = async () => {
       price: formData.value.price,
       transaction_date: formData.value.transaction_date,
       fees: formData.value.fees || 0,
-      notes: formData.value.notes || undefined
+      notes: formData.value.notes || undefined,
+      demerger_source_stock_id: formData.value.demerger_source_stock_id || undefined,
+      demerger_ratio: formData.value.demerger_ratio || undefined
     })
 
     // Reset form but keep account and stock selections
@@ -191,14 +259,19 @@ const openBulkUploadModal = () => {
 }
 
 const handleFileSelect = (event: Event) => {
+  console.log('handleFileSelect called')
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
 
   if (file) {
+    console.log('File selected:', file.name)
     if (!file.name.endsWith('.csv')) {
       csvErrors.value = ['Please select a CSV file']
       return
     }
+    // Clear previous data before parsing new file
+    csvData.value = []
+    csvErrors.value = []
     csvFile.value = file
     parseCSV(file)
   }
@@ -209,8 +282,16 @@ const parseCSV = (file: File) => {
 
   reader.onload = (e) => {
     try {
+      console.log('parseCSV onload triggered')
+
+      // Clear previous data at the start of parsing
+      csvData.value = []
+      csvErrors.value = []
+
       const text = e.target?.result as string
       const lines = text.split('\n').filter(line => line.trim())
+
+      console.log(`Total lines in CSV: ${lines.length}`)
 
       if (lines.length < 2) {
         csvErrors.value = ['CSV file must contain header and at least one data row']
@@ -276,6 +357,7 @@ const parseCSV = (file: File) => {
         })
       }
 
+      console.log(`Parsed ${parsed.length} transactions`)
       csvData.value = parsed
       csvErrors.value = errors
 
@@ -401,8 +483,16 @@ onMounted(async () => {
             <td>{{ transaction.account_name }}</td>
             <td><strong>{{ transaction.stock_symbol }}</strong></td>
             <td>
-              <span :class="['type-badge', transaction.transaction_type === 'BUY' ? 'buy' : 'sell']">
+              <span :class="['type-badge',
+                transaction.transaction_type === 'BUY' ? 'buy' :
+                transaction.transaction_type === 'SELL' ? 'sell' :
+                transaction.transaction_type === 'SPLIT' ? 'split' : 'demerger']
+              ">
                 {{ transaction.transaction_type }}
+              </span>
+              <span v-if="transaction.transaction_type === 'DEMERGER' && (transaction as any).demerger_source_stock_symbol"
+                    class="demerger-info">
+                (from {{ (transaction as any).demerger_source_stock_symbol }})
               </span>
             </td>
             <td>{{ transaction.quantity }}</td>
@@ -410,7 +500,8 @@ onMounted(async () => {
             <td>{{ formatCurrency(transaction.fees) }}</td>
             <td>{{ formatCurrency(transaction.total_value) }}</td>
             <td>{{ transaction.notes || '-' }}</td>
-            <td>
+            <td class="actions">
+              <button @click="openEditModal(transaction)" class="btn-edit-small">Edit</button>
               <button @click="deleteTransaction(transaction.id)" class="btn-danger-small">Delete</button>
             </td>
           </tr>
@@ -454,15 +545,13 @@ onMounted(async () => {
 
           <div class="form-row">
             <div class="form-group">
-              <label>Transaction Type *</label>
-              <div class="radio-group">
-                <label>
-                  <input type="radio" v-model="formData.transaction_type" value="BUY" /> Buy
-                </label>
-                <label>
-                  <input type="radio" v-model="formData.transaction_type" value="SELL" /> Sell
-                </label>
-              </div>
+              <label for="transaction_type">Transaction Type *</label>
+              <select id="transaction_type" v-model="formData.transaction_type" required>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="SPLIT">SPLIT (Stock Split/Bonus)</option>
+                <option value="DEMERGER">DEMERGER</option>
+              </select>
             </div>
           </div>
 
@@ -487,6 +576,36 @@ onMounted(async () => {
                 step="0.01"
                 required
               />
+            </div>
+          </div>
+
+          <!-- Demerger specific fields -->
+          <div v-if="formData.transaction_type === 'DEMERGER'" class="demerger-section">
+            <h4>Demerger Details</h4>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="demerger_source_stock_id">Source Stock (Parent Company) *</label>
+                <select id="demerger_source_stock_id" v-model.number="formData.demerger_source_stock_id" required>
+                  <option :value="null" disabled>Select source stock</option>
+                  <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+                    {{ stock.symbol }} - {{ stock.name }}
+                  </option>
+                </select>
+                <small>The stock from which this was demerged</small>
+              </div>
+
+              <div class="form-group">
+                <label for="demerger_ratio">Demerger Ratio *</label>
+                <input
+                  id="demerger_ratio"
+                  v-model.number="formData.demerger_ratio"
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g., 1 for 1:1, 0.5 for 1:0.5"
+                  required
+                />
+                <small>Ratio of new shares per old share (e.g., 1 for 1:1 ratio)</small>
+              </div>
             </div>
           </div>
 
@@ -534,6 +653,141 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Edit Transaction Modal -->
+    <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
+      <div class="modal-content">
+        <h2>Edit Transaction</h2>
+
+        <div v-if="error" class="error-message">{{ error }}</div>
+
+        <form @submit.prevent="updateTransaction">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_account_id">Account *</label>
+              <select id="edit_account_id" v-model.number="formData.account_id" required>
+                <option :value="null" disabled>Select account</option>
+                <option v-for="account in accounts" :key="account.id" :value="account.id">
+                  {{ account.name }}
+                </option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="edit_stock_id">Stock *</label>
+              <select id="edit_stock_id" v-model.number="formData.stock_id" required>
+                <option :value="null" disabled>Select stock</option>
+                <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+                  {{ stock.symbol }} - {{ stock.name }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_transaction_type">Type *</label>
+              <select id="edit_transaction_type" v-model="formData.transaction_type" required>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="SPLIT">SPLIT (Stock Split/Bonus)</option>
+                <option value="DEMERGER">DEMERGER</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="edit_quantity">Quantity *</label>
+              <input
+                id="edit_quantity"
+                v-model.number="formData.quantity"
+                type="number"
+                step="0.01"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_price">Price *</label>
+              <input
+                id="edit_price"
+                v-model.number="formData.price"
+                type="number"
+                step="0.01"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="edit_transaction_date">Transaction Date *</label>
+              <input
+                id="edit_transaction_date"
+                v-model="formData.transaction_date"
+                type="datetime-local"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_fees">Fees</label>
+              <input
+                id="edit_fees"
+                v-model.number="formData.fees"
+                type="number"
+                step="0.01"
+              />
+            </div>
+          </div>
+
+          <!-- Demerger specific fields in edit -->
+          <div v-if="formData.transaction_type === 'DEMERGER'" class="demerger-section">
+            <h4>Demerger Details</h4>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="edit_demerger_source_stock_id">Source Stock (Parent Company) *</label>
+                <select id="edit_demerger_source_stock_id" v-model.number="formData.demerger_source_stock_id" required>
+                  <option :value="null" disabled>Select source stock</option>
+                  <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+                    {{ stock.symbol }} - {{ stock.name }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="edit_demerger_ratio">Demerger Ratio *</label>
+                <input
+                  id="edit_demerger_ratio"
+                  v-model.number="formData.demerger_ratio"
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g., 1 for 1:1, 0.5 for 1:0.5"
+                  required
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit_notes">Notes</label>
+            <textarea
+              id="edit_notes"
+              v-model="formData.notes"
+              rows="2"
+            ></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" @click="showEditModal = false" class="btn-secondary">Cancel</button>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              {{ loading ? 'Updating...' : 'Update Transaction' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Bulk Upload Modal -->
     <div v-if="showBulkUploadModal" class="modal-overlay" @click.self="showBulkUploadModal = false">
       <div class="modal-content large-modal">
@@ -567,6 +821,7 @@ onMounted(async () => {
 
         <div v-if="csvData.length > 0" class="preview-section">
           <h3>Preview ({{ csvData.length }} transactions)</h3>
+          <p style="color: red; font-size: 0.9rem;">Debug: Array has {{ csvData.length }} items. If you see more rows below, it's a rendering issue.</p>
           <div class="preview-table-container">
             <table class="preview-table">
               <thead>
@@ -583,7 +838,7 @@ onMounted(async () => {
               </thead>
               <tbody>
                 <tr v-for="(item, idx) in csvData" :key="idx">
-                  <td>{{ item.account_name }}</td>
+                  <td>{{ idx + 1 }}. {{ item.account_name }}</td>
                   <td>{{ item.stock_symbol }}</td>
                   <td>
                     <span :class="['type-badge', item.transaction_type === 'BUY' ? 'buy' : 'sell']">
@@ -716,6 +971,21 @@ h1 {
   cursor: not-allowed;
 }
 
+.btn-edit-small {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-right: 0.5rem;
+}
+
+.btn-edit-small:hover {
+  background-color: #2980b9;
+}
+
 .btn-danger-small {
   background-color: #e74c3c;
   color: white;
@@ -724,6 +994,14 @@ h1 {
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.85rem;
+}
+
+.btn-danger-small:hover {
+  background-color: #c0392b;
+}
+
+.actions {
+  white-space: nowrap;
 }
 
 .error-message {
@@ -783,6 +1061,43 @@ h1 {
 .type-badge.sell {
   background-color: #f8d7da;
   color: #721c24;
+}
+
+.type-badge.split {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.type-badge.demerger {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.demerger-info {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-left: 0.5rem;
+}
+
+.demerger-section {
+  background-color: var(--bg-tertiary);
+  padding: 1rem;
+  border-radius: 4px;
+  margin: 1rem 0;
+  border: 1px solid var(--border-color);
+}
+
+.demerger-section h4 {
+  margin: 0 0 1rem 0;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.demerger-section small {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .modal-overlay {
