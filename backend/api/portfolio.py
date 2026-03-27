@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify
 from database import db
 from models.transaction import Transaction
+from models.holding import Holding
 from models.account import Account
 from models.stock import Stock
 from sqlalchemy import func
@@ -9,85 +10,125 @@ bp = Blueprint('portfolio', __name__)
 
 
 def calculate_holdings_from_transactions():
-    """Calculate current holdings from transaction history"""
-    # Get all transactions grouped by account and stock
-    transactions = Transaction.query.order_by(Transaction.transaction_date).all()
-    
-    holdings_dict = {}  # Key: (account_id, stock_id), Value: holding data
-    
+    print("Calculating holdings from transactions...")  # Debug log
+    """Calculate current holdings from transaction history using FIFO lot tracking.
+
+    Zerodha-aligned FIFO logic:
+      BUY      → append a new lot (quantity, price) to the back of the queue
+      SELL     → consume lots from the front (oldest first); partial lots allowed
+      SPLIT /
+      BONUS    → for each existing lot: qty *= (old+new)/old, price *= old/(old+new)
+                 (i.e. split the transaction quantity across lots proportionally,
+                  keeping total invested value per lot unchanged)
+      DEMERGER → append a zero-cost lot for the received shares
+
+    After processing, average_price = WAC of the remaining (oldest) lots.
+    """
+    from collections import deque
+
+    # Process transactions chronologically; use id to break same-day ties
+    transactions = Transaction.query.order_by(
+        Transaction.transaction_date, Transaction.id
+    ).all()
+
+    # lots_dict: (account_id, stock_id) → deque of [qty, price] pairs (oldest first)
+    lots_dict = {}
+    meta_dict = {}   # stores account/stock names and total_fees
+
     for trans in transactions:
         key = (trans.account_id, trans.stock_id)
-        
-        if key not in holdings_dict:
-            holdings_dict[key] = {
+
+        if key not in lots_dict:
+            lots_dict[key] = deque()
+            meta_dict[key] = {
                 'account_id': trans.account_id,
                 'account_name': trans.account.name,
                 'stock_id': trans.stock_id,
                 'stock_symbol': trans.stock.symbol,
                 'stock_name': trans.stock.name,
-                'quantity': 0,
-                'total_invested': 0,
-                'total_fees': 0
+                'total_fees': 0.0,
             }
-        
-        holding = holdings_dict[key]
-        
+
+        lots = lots_dict[key]
+        meta = meta_dict[key]
+
         if trans.transaction_type == 'BUY':
-            holding['quantity'] += trans.quantity
-            holding['total_invested'] += trans.quantity * trans.price
-            holding['total_fees'] += trans.fees
+            lots.append([trans.quantity, trans.price])
+            meta['total_fees'] += trans.fees
+
         elif trans.transaction_type == 'SELL':
-            # FIFO: reduce quantity and proportional investment
-            if holding['quantity'] > 0:
-                sell_ratio = trans.quantity / holding['quantity']
-                holding['total_invested'] -= holding['total_invested'] * sell_ratio
-                holding['quantity'] -= trans.quantity
-                holding['total_fees'] += trans.fees
+            remaining_sell = trans.quantity
+            while remaining_sell > 0 and lots:
+                oldest_qty, oldest_price = lots[0]
+                if oldest_qty <= remaining_sell:
+                    # Entire oldest lot is consumed
+                    remaining_sell -= oldest_qty
+                    lots.popleft()
+                else:
+                    # Partial consumption of oldest lot
+                    lots[0][0] -= remaining_sell
+                    remaining_sell = 0
+            meta['total_fees'] += trans.fees
+
         elif trans.transaction_type == 'SPLIT':
-            # Stock split/bonus shares - increase quantity but no investment cost
-            holding['quantity'] += trans.quantity
-            # No change to total_invested (no money spent)
+            # trans.quantity = total bonus/split shares received for this holding.
+            # Distribute proportionally across existing lots so that each lot's
+            # invested value is unchanged and its per-share cost drops accordingly.
+            total_existing = sum(lot[0] for lot in lots)
+            if total_existing > 0:
+                ratio = (total_existing + trans.quantity) / total_existing
+                for lot in lots:
+                    lot[1] = lot[1] / ratio          # price per share decreases
+                    lot[0] = lot[0] * ratio           # qty increases
+
         elif trans.transaction_type == 'DEMERGER':
-            # Demerger - new stock received from parent company
-            # Add the demerged stock to holdings (quantity received)
-            holding['quantity'] += trans.quantity
-            # Investment is allocated from source stock based on ratio
-            # For simplicity, treating as zero-cost basis unless specified
-    
-    # Convert to list and add calculated fields
+            # Received shares from a corporate action; zero acquisition cost.
+            lots.append([trans.quantity, 0.0])
+
+    # Convert remaining lots to output holdings
     holdings_list = []
-    for holding in holdings_dict.values():
-        if holding['quantity'] > 0:  # Only include non-zero holdings
-            average_price = holding['total_invested'] / holding['quantity'] if holding['quantity'] > 0 else 0
-            
-            stock = Stock.query.get(holding['stock_id'])
-            current_price = stock.current_price or 0
-            current_value = holding['quantity'] * current_price
-            gain_loss = current_value - holding['total_invested']
-            gain_loss_percentage = (gain_loss / holding['total_invested'] * 100) if holding['total_invested'] > 0 else 0
-            
-            holdings_list.append({
-                'account_id': holding['account_id'],
-                'account_name': holding['account_name'],
-                'stock_id': holding['stock_id'],
-                'stock_symbol': holding['stock_symbol'],
-                'stock_name': holding['stock_name'],
-                'quantity': round(holding['quantity'], 4),
-                'average_price': round(average_price, 2),
-                'current_price': round(current_price, 2),
-                'invested_value': round(holding['total_invested'], 2),
-                'current_value': round(current_value, 2),
-                'total_fees': round(holding['total_fees'], 2),
-                'gain_loss': round(gain_loss, 2),
-                'gain_loss_percentage': round(gain_loss_percentage, 2)
-            })
-    
+    for key, lots in lots_dict.items():
+        if not lots:
+            continue
+
+        total_qty = sum(lot[0] for lot in lots)
+        if total_qty <= 0:
+            continue
+
+        # Average price = WAC of remaining FIFO lots (matches what Zerodha shows)
+        total_invested = sum(lot[0] * lot[1] for lot in lots)
+        average_price = total_invested / total_qty
+
+        meta = meta_dict[key]
+        stock = Stock.query.get(meta['stock_id'])
+        current_price = stock.current_price or 0
+        current_value = total_qty * current_price
+        gain_loss = current_value - total_invested
+        gain_loss_percentage = (gain_loss / total_invested * 100) if total_invested > 0 else 0
+
+        holdings_list.append({
+            'account_id': meta['account_id'],
+            'account_name': meta['account_name'],
+            'stock_id': meta['stock_id'],
+            'stock_symbol': meta['stock_symbol'],
+            'stock_name': meta['stock_name'],
+            'quantity': round(total_qty, 4),
+            'average_price': round(average_price, 2),
+            'current_price': round(current_price, 2),
+            'invested_value': round(total_invested, 2),
+            'current_value': round(current_value, 2),
+            'total_fees': round(meta['total_fees'], 2),
+            'gain_loss': round(gain_loss, 2),
+            'gain_loss_percentage': round(gain_loss_percentage, 2),
+        })
+
     return holdings_list
 
 
 @bp.route('/holdings', methods=['GET'])
 def get_holdings():
     """Get current holdings calculated from transactions"""
+    print("API call: GET /portfolio/holdings")  # Debug log
     holdings = calculate_holdings_from_transactions()
     return jsonify(holdings)
 
@@ -177,3 +218,4 @@ def get_top_performers():
         'top_gainers': sorted_holdings[:5],
         'top_losers': sorted_holdings[-5:] if len(sorted_holdings) > 5 else []
     })
+
