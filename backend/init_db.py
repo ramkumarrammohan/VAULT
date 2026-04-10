@@ -3,11 +3,27 @@ import sqlite3
 import os
 from datetime import datetime
 
+
+
 os.chdir(os.path.dirname(__file__))
 
 print("Creating database with all tables...")
 
-conn = sqlite3.connect('portfolio.db')
+
+# Use Config class for database configuration
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
+from config.config import Config
+
+db_url = Config.SQLALCHEMY_DATABASE_URI
+if db_url.startswith('sqlite:///'):
+    db_path = db_url.replace('sqlite:///', '', 1)
+elif db_url.startswith('sqlite://'):
+    db_path = db_url.replace('sqlite://', '', 1)
+else:
+    raise ValueError("Only sqlite databases are supported by this script.")
+
+conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
 # Create accounts table

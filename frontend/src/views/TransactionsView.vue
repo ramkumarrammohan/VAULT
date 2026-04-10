@@ -22,13 +22,36 @@ const csvErrors = ref<string[]>([])
 const uploadLoading = ref(false)
 const editingTransactionId = ref<number | null>(null)
 
+// Convert local datetime string (from datetime-local input) to UTC ISO string before sending to backend
+const toUTCISOString = (localDateString: string): string => {
+  if (!localDateString) return '';
+  return new Date(localDateString).toISOString();
+}
+
+// Convert UTC ISO string from backend to local datetime string for datetime-local input
+const toLocalDateTimeInput = (utcString: string): string => {
+  if (!utcString) return '';
+  const d = new Date(utcString.endsWith('Z') ? utcString : utcString + 'Z');
+  const offset = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+// Get current local datetime string for datetime-local input default
+const nowLocalDateTimeInput = (): string => {
+  const d = new Date();
+  const offset = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 const formData = ref({
   account_id: null as number | null,
   stock_id: null as number | null,
   transaction_type: 'BUY' as 'BUY' | 'SELL' | 'SPLIT' | 'DEMERGER',
   quantity: null as number | null,
   price: null as number | null,
-  transaction_date: new Date().toISOString().slice(0, 16),
+  transaction_date: nowLocalDateTimeInput(),
   fees: 0,
   notes: '',
   demerger_source_stock_id: null as number | null,
@@ -81,7 +104,7 @@ const openEditModal = (transaction: Transaction) => {
     transaction_type: transaction.transaction_type,
     quantity: transaction.quantity,
     price: transaction.price,
-    transaction_date: new Date(transaction.transaction_date).toISOString().slice(0, 16),
+    transaction_date: toLocalDateTimeInput(transaction.transaction_date),
     fees: transaction.fees || 0,
     notes: transaction.notes || '',
     demerger_source_stock_id: (transaction as any).demerger_source_stock_id || null,
@@ -97,7 +120,10 @@ const updateTransaction = async () => {
   error.value = null
 
   try {
-    await transactionApi.update(editingTransactionId.value, formData.value)
+    await transactionApi.update(editingTransactionId.value, {
+      ...formData.value,
+      transaction_date: toUTCISOString(formData.value.transaction_date)
+    })
     showEditModal.value = false
     editingTransactionId.value = null
     await loadTransactions()
@@ -130,7 +156,7 @@ const openAddModal = () => {
     transaction_type: 'BUY',
     quantity: null,
     price: null,
-    transaction_date: new Date().toISOString().slice(0, 16),
+    transaction_date: nowLocalDateTimeInput(),
     fees: 0,
     notes: '',
     demerger_source_stock_id: null,
@@ -166,7 +192,7 @@ const submitTransaction = async () => {
       transaction_type: formData.value.transaction_type,
       quantity: formData.value.quantity,
       price: formData.value.price,
-      transaction_date: formData.value.transaction_date,
+      transaction_date: toUTCISOString(formData.value.transaction_date),
       fees: formData.value.fees || 0,
       notes: formData.value.notes || undefined,
       demerger_source_stock_id: formData.value.demerger_source_stock_id || undefined,
@@ -209,7 +235,7 @@ const submitAndReset = async () => {
       transaction_type: formData.value.transaction_type,
       quantity: formData.value.quantity,
       price: formData.value.price,
-      transaction_date: formData.value.transaction_date,
+      transaction_date: toUTCISOString(formData.value.transaction_date),
       fees: formData.value.fees || 0,
       notes: formData.value.notes || undefined,
       demerger_source_stock_id: formData.value.demerger_source_stock_id || undefined,
@@ -225,7 +251,7 @@ const submitAndReset = async () => {
       transaction_type: formData.value.transaction_type,
       quantity: null,
       price: null,
-      transaction_date: new Date().toISOString().slice(0, 16),
+      transaction_date: nowLocalDateTimeInput(),
       fees: 0,
       notes: ''
     }
@@ -248,7 +274,12 @@ const formatCurrency = (value: number) => {
 }
 
 const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleString()
+  // Always treat the input as UTC and convert to local time for display
+  if (!dateString) return ''
+  // Ensure the string ends with 'Z' to be parsed as UTC if not already
+  let utcString = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+  const date = new Date(utcString);
+  return date.toLocaleString();
 }
 
 const openBulkUploadModal = () => {
