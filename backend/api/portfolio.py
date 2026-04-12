@@ -123,18 +123,8 @@ def calculate_holdings_from_transactions():
                     lots = lots_dict[key]
                     total_old_shares = sum(lot[0] for lot in lots)
                     total_old_cost = sum(lot[0] * lot[1] for lot in lots)
-                    if event.related_stock_id and total_old_shares > 0 and event.parent_cost_pct is not None and event.demerged_cost_pct is not None:
-                        # parent_cost_pct: % to keep in old stock, demerged_cost_pct: % to transfer to new
-                        # For merger, usually parent_cost_pct=0, demerged_cost_pct=100
-                        transfer_cost = total_old_cost * (event.demerged_cost_pct / 100.0)
-                        # Remove cost from old lots
-                        if total_old_cost > 0:
-                            for lot in lots:
-                                orig_cost = lot[0] * lot[1]
-                                if orig_cost > 0:
-                                    new_cost = orig_cost * (event.parent_cost_pct / 100.0)
-                                    lot[1] = new_cost / lot[0]
-                        # Add/adjust lots for new stock
+                    if event.related_stock_id and total_old_shares > 0:
+                        # Add/adjust lots for new stock FIRST, using original prices
                         new_key = (account_id, event.related_stock_id)
                         if new_key not in lots_dict:
                             lots_dict[new_key] = deque()
@@ -147,19 +137,18 @@ def calculate_holdings_from_transactions():
                                 'stock_name': stock.name if stock else '',
                                 'total_fees': meta_dict[key]['total_fees'],
                             }
-                        # For each lot, transfer shares and cost as per ratio
-                        for lot in lots_dict[key]:
+                        demerged_pct = event.demerged_cost_pct / 100.0 if event.demerged_cost_pct is not None else 1.0
+                        parent_pct = event.parent_cost_pct / 100.0 if event.parent_cost_pct is not None else 0.0
+                        # For each lot, transfer shares and cost as per ratio using original prices
+                        for lot in list(lots_dict[key]):
                             qty = lot[0]
-                            price = lot[1]
-                            if event.ratio and event.ratio > 0:
-                                qty_new = qty * event.ratio
-                            else:
-                                qty_new = qty
-                            # Assign transferred cost basis to new lot
-                            lot_cost = qty * price
-                            transferred_cost = lot_cost * (event.demerged_cost_pct / 100.0)
+                            orig_price = lot[1]
+                            qty_new = qty * event.ratio if (event.ratio and event.ratio > 0) else qty
+                            lot_cost = qty * orig_price
+                            transferred_cost = lot_cost * demerged_pct
                             new_price = transferred_cost / qty_new if qty_new > 0 else 0.0
                             lots_dict[new_key].append([qty_new, new_price])
+                        # Extinguish old stock lots — old company ceases to exist in a merger/amalgamation
                         lots_dict[key].clear()
             # DIVIDEND and NAME_CHANGE do not affect lots (for reporting only)
 
