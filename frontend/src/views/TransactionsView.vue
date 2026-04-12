@@ -48,14 +48,12 @@ const nowLocalDateTimeInput = (): string => {
 const formData = ref({
   account_id: null as number | null,
   stock_id: null as number | null,
-  transaction_type: 'BUY' as 'BUY' | 'SELL' | 'SPLIT' | 'DEMERGER',
+  transaction_type: 'BUY' as 'BUY' | 'SELL',
   quantity: null as number | null,
   price: null as number | null,
   transaction_date: nowLocalDateTimeInput(),
   fees: 0,
-  notes: '',
-  demerger_source_stock_id: null as number | null,
-  demerger_ratio: null as number | null
+  notes: ''
 })
 
 const loadAccounts = async () => {
@@ -107,8 +105,7 @@ const openEditModal = (transaction: Transaction) => {
     transaction_date: toLocalDateTimeInput(transaction.transaction_date),
     fees: transaction.fees || 0,
     notes: transaction.notes || '',
-    demerger_source_stock_id: (transaction as any).demerger_source_stock_id || null,
-    demerger_ratio: (transaction as any).demerger_ratio || null
+    // SPLIT/DEMERGER fields removed
   }
   showEditModal.value = true
 }
@@ -159,8 +156,7 @@ const openAddModal = () => {
     transaction_date: nowLocalDateTimeInput(),
     fees: 0,
     notes: '',
-    demerger_source_stock_id: null,
-    demerger_ratio: null
+    // SPLIT/DEMERGER fields removed
   }
   showAddModal.value = true
 }
@@ -171,7 +167,7 @@ const submitTransaction = async () => {
     return
   }
 
-  // Price is required for BUY/SELL but can be 0 for SPLIT/DEMERGER
+  // Price is required for BUY/SELL
   if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
     error.value = 'Price is required for BUY/SELL transactions'
     return
@@ -195,8 +191,7 @@ const submitTransaction = async () => {
       transaction_date: toUTCISOString(formData.value.transaction_date),
       fees: formData.value.fees || 0,
       notes: formData.value.notes || undefined,
-      demerger_source_stock_id: formData.value.demerger_source_stock_id || undefined,
-      demerger_ratio: formData.value.demerger_ratio || undefined
+      // SPLIT/DEMERGER fields removed
     })
     showAddModal.value = false
     await loadTransactions()
@@ -214,7 +209,7 @@ const submitAndReset = async () => {
     return
   }
 
-  // Price is required for BUY/SELL but can be 0 for SPLIT/DEMERGER
+  // Price is required for BUY/SELL
   if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
     error.value = 'Price is required for BUY/SELL transactions'
     return
@@ -238,8 +233,7 @@ const submitAndReset = async () => {
       transaction_date: toUTCISOString(formData.value.transaction_date),
       fees: formData.value.fees || 0,
       notes: formData.value.notes || undefined,
-      demerger_source_stock_id: formData.value.demerger_source_stock_id || undefined,
-      demerger_ratio: formData.value.demerger_ratio || undefined
+      // SPLIT/DEMERGER fields removed
     })
 
     // Reset form but keep account and stock selections
@@ -580,8 +574,6 @@ onMounted(async () => {
               <select id="transaction_type" v-model="formData.transaction_type" required>
                 <option value="BUY">BUY</option>
                 <option value="SELL">SELL</option>
-                <option value="SPLIT">SPLIT (Stock Split/Bonus)</option>
-                <option value="DEMERGER">DEMERGER</option>
               </select>
             </div>
           </div>
@@ -610,35 +602,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Demerger specific fields -->
-          <div v-if="formData.transaction_type === 'DEMERGER'" class="demerger-section">
-            <h4>Demerger Details</h4>
-            <div class="form-row">
-              <div class="form-group">
-                <label for="demerger_source_stock_id">Source Stock (Parent Company) *</label>
-                <select id="demerger_source_stock_id" v-model.number="formData.demerger_source_stock_id" required>
-                  <option :value="null" disabled>Select source stock</option>
-                  <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
-                    {{ stock.symbol }} - {{ stock.name }}
-                  </option>
-                </select>
-                <small>The stock from which this was demerged</small>
-              </div>
 
-              <div class="form-group">
-                <label for="demerger_ratio">Demerger Ratio *</label>
-                <input
-                  id="demerger_ratio"
-                  v-model.number="formData.demerger_ratio"
-                  type="number"
-                  step="0.01"
-                  placeholder="e.g., 1 for 1:1, 0.5 for 1:0.5"
-                  required
-                />
-                <small>Ratio of new shares per old share (e.g., 1 for 1:1 ratio)</small>
-              </div>
-            </div>
-          </div>
 
           <div class="form-row">
             <div class="form-group">
@@ -772,33 +736,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Demerger specific fields in edit -->
-          <div v-if="formData.transaction_type === 'DEMERGER'" class="demerger-section">
-            <h4>Demerger Details</h4>
-            <div class="form-row">
-              <div class="form-group">
-                <label for="edit_demerger_source_stock_id">Source Stock (Parent Company) *</label>
-                <select id="edit_demerger_source_stock_id" v-model.number="formData.demerger_source_stock_id" required>
-                  <option :value="null" disabled>Select source stock</option>
-                  <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
-                    {{ stock.symbol }} - {{ stock.name }}
-                  </option>
-                </select>
-              </div>
 
-              <div class="form-group">
-                <label for="edit_demerger_ratio">Demerger Ratio *</label>
-                <input
-                  id="edit_demerger_ratio"
-                  v-model.number="formData.demerger_ratio"
-                  type="number"
-                  step="0.01"
-                  placeholder="e.g., 1 for 1:1, 0.5 for 1:0.5"
-                  required
-                />
-              </div>
-            </div>
-          </div>
 
           <div class="form-group">
             <label for="edit_notes">Notes</label>

@@ -70,3 +70,17 @@ export interface Transaction {
   notes?: string
   created_at?: string
 }
+
+export interface CorporateEvent {
+  id?: number
+  stock_id: number
+  stock_symbol?: string
+  event_type: string
+  event_date: string
+  ratio?: number | null
+  quantity?: number | null
+  amount?: number | null
+  related_stock_id?: number | null
+  related_stock_symbol?: string
+  notes?: string
+}

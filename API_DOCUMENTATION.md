@@ -10,11 +10,11 @@ Currently, no authentication is required. Authentication can be added as a middl
 
 ---
 
-## Brokers API
+## Accounts API
 
-### Get All Brokers
+### Get All Accounts
 ```http
-GET /api/brokers
+GET /api/accounts
 ```
 
 **Response:**
@@ -30,9 +30,9 @@ GET /api/brokers
 ]
 ```
 
-### Create Broker
+### Create Account
 ```http
-POST /api/brokers
+POST /api/accounts
 Content-Type: application/json
 
 {
@@ -41,7 +41,7 @@ Content-Type: application/json
 }
 ```
 
-### Update Broker
+### Update Account
 ```http
 PUT /api/brokers/{id}
 Content-Type: application/json
@@ -52,9 +52,9 @@ Content-Type: application/json
 }
 ```
 
-### Delete Broker
+### Delete Account
 ```http
-DELETE /api/brokers/{id}
+DELETE /api/accounts/{id}
 ```
 
 ---
@@ -386,6 +386,223 @@ CORS is enabled for the following origins (configurable in `.env`):
 - `GET /api/reports/performance` - Performance over time
 - `GET /api/reports/allocation` - Asset allocation breakdown
 - `GET /api/reports/export` - Export portfolio data (CSV/PDF)
+
+---
+
+## Corporate Events API
+
+### Get All Corporate Events
+```http
+GET /api/corporate-events/
+```
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "stock_id": 1,
+    "stock_symbol": "AAPL",
+    "event_type": "SPLIT",
+    "event_date": "2026-04-01",
+    "ratio": 2.0,
+    "quantity": null,
+    "amount": null,
+    "related_stock_id": null,
+    "related_stock_symbol": null,
+    "notes": "2-for-1 split"
+  }
+]
+```
+
+### Get Corporate Event by ID
+```http
+GET /api/corporate-events/{id}
+```
+**Response:**
+```json
+{
+  "id": 1,
+  "stock_id": 1,
+  "stock_symbol": "AAPL",
+  "event_type": "SPLIT",
+  "event_date": "2026-04-01",
+  "ratio": 2.0,
+  "quantity": null,
+  "amount": null,
+  "related_stock_id": null,
+  "related_stock_symbol": null,
+  "notes": "2-for-1 split"
+}
+```
+
+### Create Corporate Event
+```http
+POST /api/corporate-events/
+Content-Type: application/json
+
+{
+  "stock_id": 1,
+  "event_type": "SPLIT",
+  "event_date": "2026-04-01",
+  "ratio": 2.0,
+  "notes": "2-for-1 split"
+}
+```
+**Response:**
+```json
+{
+  "id": 2,
+  "stock_id": 1,
+  "stock_symbol": "AAPL",
+  "event_type": "SPLIT",
+  "event_date": "2026-04-01",
+  "ratio": 2.0,
+  "quantity": null,
+  "amount": null,
+  "related_stock_id": null,
+  "related_stock_symbol": null,
+  "notes": "2-for-1 split"
+}
+```
+
+### Update Corporate Event
+```http
+PUT /api/corporate-events/{id}
+Content-Type: application/json
+
+{
+  "ratio": 3.0,
+  "notes": "3-for-1 split"
+}
+```
+**Response:**
+```json
+{
+  "id": 2,
+  "stock_id": 1,
+  "stock_symbol": "AAPL",
+  "event_type": "SPLIT",
+  "event_date": "2026-04-01",
+  "ratio": 3.0,
+  "quantity": null,
+  "amount": null,
+  "related_stock_id": null,
+  "related_stock_symbol": null,
+  "notes": "3-for-1 split"
+}
+```
+
+### Delete Corporate Event
+```http
+DELETE /api/corporate-events/{id}
+```
+**Response:**
+```
+204 No Content
+```
+
+**Error Responses:**
+- 400 Bad Request: Invalid data or missing required fields
+- 404 Not Found: Event not found
+
+---
+
+## Transactions API
+
+### Get All Transactions
+```http
+GET /api/transactions
+```
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "account_id": 1,
+    "stock_id": 1,
+    "transaction_type": "BUY",
+    "quantity": 10,
+    "price": 150.00,
+    "transaction_date": "2026-04-01T10:00:00",
+    "fees": 10.0,
+    "notes": "Initial buy",
+    "created_at": "2026-04-01T10:00:00"
+  }
+]
+```
+
+### Create Transaction
+```http
+POST /api/transactions
+Content-Type: application/json
+
+{
+  "account_id": 1,
+  "stock_id": 1,
+  "transaction_type": "BUY",
+  "quantity": 10,
+  "price": 150.00,
+  "transaction_date": "2026-04-01T10:00:00",
+  "fees": 10.0,
+  "notes": "Initial buy"
+}
+```
+**Response:**
+```json
+{
+  "id": 2,
+  "account_id": 1,
+  "stock_id": 1,
+  "transaction_type": "BUY",
+  "quantity": 10,
+  "price": 150.00,
+  "transaction_date": "2026-04-01T10:00:00",
+  "fees": 10.0,
+  "notes": "Initial buy",
+  "created_at": "2026-04-01T10:00:00"
+}
+```
+
+### Update Transaction
+```http
+PUT /api/transactions/{id}
+Content-Type: application/json
+
+{
+  "quantity": 12,
+  "price": 155.00,
+  "notes": "Updated quantity"
+}
+```
+**Response:**
+```json
+{
+  "id": 2,
+  "account_id": 1,
+  "stock_id": 1,
+  "transaction_type": "BUY",
+  "quantity": 12,
+  "price": 155.00,
+  "transaction_date": "2026-04-01T10:00:00",
+  "fees": 10.0,
+  "notes": "Updated quantity",
+  "created_at": "2026-04-01T10:00:00"
+}
+```
+
+### Delete Transaction
+```http
+DELETE /api/transactions/{id}
+```
+**Response:**
+```
+204 No Content
+```
+
+**Error Responses:**
+- 400 Bad Request: Invalid data or missing required fields
+- 404 Not Found: Transaction not found
+- 409 Conflict: Duplicate or conflicting transaction
 
 ---
 

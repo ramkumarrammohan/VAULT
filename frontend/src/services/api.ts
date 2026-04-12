@@ -1,3 +1,11 @@
+// Corporate Events API
+export const corporateEventApi = {
+  getAll: () => apiClient.get('/corporate-events/'),
+  getById: (id: number) => apiClient.get(`/corporate-events/${id}`),
+  create: (data: any) => apiClient.post('/corporate-events/', data),
+  update: (id: number, data: any) => apiClient.put(`/corporate-events/${id}`, data),
+  delete: (id: number) => apiClient.delete(`/corporate-events/${id}`)
+}
 import axios from 'axios'
 
 const apiClient = axios.create({

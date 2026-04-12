@@ -4,108 +4,181 @@ from models.transaction import Transaction
 from models.holding import Holding
 from models.account import Account
 from models.stock import Stock
+from models.corporate_event import CorporateEvent
 from sqlalchemy import func
 
 bp = Blueprint('portfolio', __name__)
 
 
 def calculate_holdings_from_transactions():
-    print("Calculating holdings from transactions...")  # Debug log
-    """Calculate current holdings from transaction history using FIFO lot tracking.
 
-    Zerodha-aligned FIFO logic:
-      BUY      → append a new lot (quantity, price) to the back of the queue
-      SELL     → consume lots from the front (oldest first); partial lots allowed
-      SPLIT /
-      BONUS    → for each existing lot: qty *= (old+new)/old, price *= old/(old+new)
-                 (i.e. split the transaction quantity across lots proportionally,
-                  keeping total invested value per lot unchanged)
-      DEMERGER → append a zero-cost lot for the received shares
-
-    After processing, average_price = WAC of the remaining (oldest) lots.
+    print("Calculating holdings from transactions and corporate events...")  # Debug log
+    """
+    Calculate current holdings from transaction history and corporate events using FIFO lot tracking.
     """
     from collections import deque
+    from datetime import datetime
 
-    # Process transactions chronologically; use id to break same-day ties
-    transactions = Transaction.query.order_by(
-        Transaction.transaction_date, Transaction.id
-    ).all()
+    # Fetch all transactions and corporate events, merge and sort by date and id
+    transactions = Transaction.query.order_by(Transaction.transaction_date, Transaction.id).all()
+    events = CorporateEvent.query.order_by(CorporateEvent.event_date, CorporateEvent.id).all()
 
-    # lots_dict: (account_id, stock_id) → deque of [qty, price] pairs (oldest first)
-    lots_dict = {}
-    meta_dict = {}   # stores account/stock names and total_fees
+    # Build a unified action list: (date, id, 'transaction'/'event', object)
+    actions = []
+    for t in transactions:
+        actions.append((t.transaction_date, t.id, 'transaction', t))
+    for e in events:
+        # Use stock_id as account_id = None for events (will apply to all accounts holding the stock)
+        actions.append((datetime.combine(e.event_date, datetime.min.time()), e.id, 'event', e))
+    actions.sort()
 
-    for trans in transactions:
-        key = (trans.account_id, trans.stock_id)
+    lots_dict = {}  # (account_id, stock_id) -> deque of [qty, price]
+    meta_dict = {}  # (account_id, stock_id) -> meta info
 
-        if key not in lots_dict:
-            lots_dict[key] = deque()
-            meta_dict[key] = {
-                'account_id': trans.account_id,
-                'account_name': trans.account.name,
-                'stock_id': trans.stock_id,
-                'stock_symbol': trans.stock.symbol,
-                'stock_name': trans.stock.name,
-                'total_fees': 0.0,
-            }
-
-        lots = lots_dict[key]
-        meta = meta_dict[key]
-
-        if trans.transaction_type == 'BUY':
-            lots.append([trans.quantity, trans.price])
-            meta['total_fees'] += trans.fees
-
-        elif trans.transaction_type == 'SELL':
-            remaining_sell = trans.quantity
-            while remaining_sell > 0 and lots:
-                oldest_qty, oldest_price = lots[0]
-                if oldest_qty <= remaining_sell:
-                    # Entire oldest lot is consumed
-                    remaining_sell -= oldest_qty
-                    lots.popleft()
-                else:
-                    # Partial consumption of oldest lot
-                    lots[0][0] -= remaining_sell
-                    remaining_sell = 0
-            meta['total_fees'] += trans.fees
-
-        elif trans.transaction_type == 'SPLIT':
-            # trans.quantity = total bonus/split shares received for this holding.
-            # Distribute proportionally across existing lots so that each lot's
-            # invested value is unchanged and its per-share cost drops accordingly.
-            total_existing = sum(lot[0] for lot in lots)
-            if total_existing > 0:
-                ratio = (total_existing + trans.quantity) / total_existing
-                for lot in lots:
-                    lot[1] = lot[1] / ratio          # price per share decreases
-                    lot[0] = lot[0] * ratio           # qty increases
-
-        elif trans.transaction_type == 'DEMERGER':
-            # Received shares from a corporate action; zero acquisition cost.
-            lots.append([trans.quantity, 0.0])
+    for action in actions:
+        _, _, action_type, obj = action
+        if action_type == 'transaction':
+            trans = obj
+            key = (trans.account_id, trans.stock_id)
+            if key not in lots_dict:
+                lots_dict[key] = deque()
+                meta_dict[key] = {
+                    'account_id': trans.account_id,
+                    'account_name': trans.account.name,
+                    'stock_id': trans.stock_id,
+                    'stock_symbol': trans.stock.symbol,
+                    'stock_name': trans.stock.name,
+                    'total_fees': 0.0,
+                }
+            lots = lots_dict[key]
+            meta = meta_dict[key]
+            if trans.transaction_type == 'BUY':
+                lots.append([trans.quantity, trans.price])
+                meta['total_fees'] += trans.fees
+            elif trans.transaction_type == 'SELL':
+                remaining_sell = trans.quantity
+                while remaining_sell > 0 and lots:
+                    oldest_qty, oldest_price = lots[0]
+                    if oldest_qty <= remaining_sell:
+                        remaining_sell -= oldest_qty
+                        lots.popleft()
+                    else:
+                        lots[0][0] -= remaining_sell
+                        remaining_sell = 0
+                meta['total_fees'] += trans.fees
+            # Ignore SPLIT/DEMERGER in transaction table (handled by events)
+        elif action_type == 'event':
+            event = obj
+            # Apply event to all lots for the stock (across all accounts)
+            affected_keys = [k for k in lots_dict if k[1] == event.stock_id]
+            if event.event_type.name == 'SPLIT':
+                # Adjust lots for split ratio (e.g., 2-for-1 split: ratio=2.0)
+                for key in affected_keys:
+                    lots = lots_dict[key]
+                    if event.ratio and event.ratio > 0:
+                        for lot in lots:
+                            lot[0] *= event.ratio
+                            lot[1] /= event.ratio
+            elif event.event_type.name == 'DEMERGER':
+                # For each account holding the parent stock, split cost basis and add new lots for the demerged company
+                for key in affected_keys:
+                    account_id, parent_stock_id = key
+                    lots = lots_dict[key]
+                    total_parent_shares = sum(lot[0] for lot in lots)
+                    total_parent_cost = sum(lot[0] * lot[1] for lot in lots)
+                    if event.ratio and event.related_stock_id and total_parent_shares > 0 and event.parent_cost_pct is not None and event.demerged_cost_pct is not None:
+                        # Calculate new shares: e.g., 1 for every 10 held (ratio=0.1)
+                        new_shares = total_parent_shares * event.ratio
+                        # Apportion cost basis
+                        parent_cost = total_parent_cost * (event.parent_cost_pct / 100.0)
+                        demerged_cost = total_parent_cost * (event.demerged_cost_pct / 100.0)
+                        # Adjust parent lots' cost basis proportionally
+                        if total_parent_cost > 0:
+                            for lot in lots:
+                                orig_cost = lot[0] * lot[1]
+                                if orig_cost > 0:
+                                    new_cost = orig_cost * (event.parent_cost_pct / 100.0)
+                                    lot[1] = new_cost / lot[0]
+                        # Add new lot for demerged company
+                        if new_shares > 0:
+                            new_key = (account_id, event.related_stock_id)
+                            if new_key not in lots_dict:
+                                lots_dict[new_key] = deque()
+                                stock = Stock.query.get(event.related_stock_id)
+                                meta_dict[new_key] = {
+                                    'account_id': account_id,
+                                    'account_name': meta_dict[key]['account_name'],
+                                    'stock_id': event.related_stock_id,
+                                    'stock_symbol': stock.symbol if stock else '',
+                                    'stock_name': stock.name if stock else '',
+                                    'total_fees': meta_dict[key]['total_fees'],
+                                }
+                            # Correct calculation: apportioned cost divided by new shares
+                            demerged_price = demerged_cost / new_shares if new_shares > 0 else 0.0
+                            lots_dict[new_key].append([new_shares, demerged_price])
+            elif event.event_type.name in ('MERGER', 'AMALGAMATION'):
+                # Move/merge lots from old to new stock, adjust quantities and cost basis
+                for key in affected_keys:
+                    account_id, old_stock_id = key
+                    lots = lots_dict[key]
+                    total_old_shares = sum(lot[0] for lot in lots)
+                    total_old_cost = sum(lot[0] * lot[1] for lot in lots)
+                    if event.related_stock_id and total_old_shares > 0 and event.parent_cost_pct is not None and event.demerged_cost_pct is not None:
+                        # parent_cost_pct: % to keep in old stock, demerged_cost_pct: % to transfer to new
+                        # For merger, usually parent_cost_pct=0, demerged_cost_pct=100
+                        transfer_cost = total_old_cost * (event.demerged_cost_pct / 100.0)
+                        # Remove cost from old lots
+                        if total_old_cost > 0:
+                            for lot in lots:
+                                orig_cost = lot[0] * lot[1]
+                                if orig_cost > 0:
+                                    new_cost = orig_cost * (event.parent_cost_pct / 100.0)
+                                    lot[1] = new_cost / lot[0]
+                        # Add/adjust lots for new stock
+                        new_key = (account_id, event.related_stock_id)
+                        if new_key not in lots_dict:
+                            lots_dict[new_key] = deque()
+                            stock = Stock.query.get(event.related_stock_id)
+                            meta_dict[new_key] = {
+                                'account_id': account_id,
+                                'account_name': meta_dict[key]['account_name'],
+                                'stock_id': event.related_stock_id,
+                                'stock_symbol': stock.symbol if stock else '',
+                                'stock_name': stock.name if stock else '',
+                                'total_fees': meta_dict[key]['total_fees'],
+                            }
+                        # For each lot, transfer shares and cost as per ratio
+                        for lot in lots_dict[key]:
+                            qty = lot[0]
+                            price = lot[1]
+                            if event.ratio and event.ratio > 0:
+                                qty_new = qty * event.ratio
+                            else:
+                                qty_new = qty
+                            # Assign transferred cost basis to new lot
+                            lot_cost = qty * price
+                            transferred_cost = lot_cost * (event.demerged_cost_pct / 100.0)
+                            new_price = transferred_cost / qty_new if qty_new > 0 else 0.0
+                            lots_dict[new_key].append([qty_new, new_price])
+                        lots_dict[key].clear()
+            # DIVIDEND and NAME_CHANGE do not affect lots (for reporting only)
 
     # Convert remaining lots to output holdings
     holdings_list = []
     for key, lots in lots_dict.items():
         if not lots:
             continue
-
         total_qty = sum(lot[0] for lot in lots)
         if total_qty <= 0:
             continue
-
-        # Average price = WAC of remaining FIFO lots (matches what Zerodha shows)
         total_invested = sum(lot[0] * lot[1] for lot in lots)
-        average_price = total_invested / total_qty
-
+        average_price = total_invested / total_qty if total_qty > 0 else 0
         meta = meta_dict[key]
         stock = Stock.query.get(meta['stock_id'])
         current_price = stock.current_price or 0
         current_value = total_qty * current_price
         gain_loss = current_value - total_invested
         gain_loss_percentage = (gain_loss / total_invested * 100) if total_invested > 0 else 0
-
         holdings_list.append({
             'account_id': meta['account_id'],
             'account_name': meta['account_name'],
@@ -121,7 +194,6 @@ def calculate_holdings_from_transactions():
             'gain_loss': round(gain_loss, 2),
             'gain_loss_percentage': round(gain_loss_percentage, 2),
         })
-
     return holdings_list
 
 

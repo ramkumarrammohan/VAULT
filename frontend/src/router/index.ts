@@ -1,3 +1,4 @@
+import CorporateEventsView from '@/views/CorporateEventsView.vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import DashboardView from '@/views/DashboardView.vue'
 import AccountsView from '@/views/AccountsView.vue'
@@ -59,6 +60,11 @@ const router = createRouter({
       path: '/transactions',
       name: 'transactions',
       component: TransactionsView
+    },
+    {
+      path: '/corporate-events',
+      name: 'corporate-events',
+      component: CorporateEventsView
     }
   ],
 })

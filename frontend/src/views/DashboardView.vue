@@ -1,7 +1,9 @@
 <script setup lang="ts">
+
 import { ref, computed, onMounted } from 'vue'
 import { portfolioApi, holdingApi, priceApi, accountApi, stockApi } from '@/services/api'
 import type { PortfolioSummary, Holding, Account, Stock } from '@/types'
+
 
 const summary = ref<PortfolioSummary | null>(null)
 const holdings = ref<Holding[]>([])
@@ -162,17 +164,20 @@ onMounted(() => {
 
 <template>
   <div class="dashboard">
+
     <div class="header">
       <h1>Portfolio Dashboard</h1>
-      <button @click="updateAllPrices" :disabled="updating" class="btn-primary">
-        {{ updating ? 'Updating...' : 'Update Prices' }}
-      </button>
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <button @click="updateAllPrices" :disabled="updating" class="btn-primary">
+          {{ updating ? 'Updating...' : 'Update Prices' }}
+        </button>
+        <router-link to="/corporate-events" class="btn-primary">Corporate Actions</router-link>
+      </div>
     </div>
 
     <div v-if="loading" class="loading">Loading...</div>
 
     <div v-else-if="summary" class="content">
-      <!-- Summary Cards -->
       <div class="summary-cards">
         <div class="card">
           <h3>Total Invested</h3>
@@ -198,8 +203,6 @@ onMounted(() => {
       <!-- Holdings Table -->
       <div class="holdings-section">
         <h2>Your Holdings</h2>
-
-        <!-- Filter Section -->
         <div class="filter-section">
           <div class="filter-group">
             <label for="account-filter">Filter by Account:</label>
