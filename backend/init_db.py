@@ -3,8 +3,6 @@ import sqlite3
 import os
 from datetime import datetime
 
-
-
 os.chdir(os.path.dirname(__file__))
 
 print("Creating database with all tables...")
@@ -16,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
 from config.config import Config
 
 db_url = Config.SQLALCHEMY_DATABASE_URI
+print(f"Using database URL: {db_url}")
 if db_url.startswith('sqlite:///'):
     db_path = db_url.replace('sqlite:///', '', 1)
 elif db_url.startswith('sqlite://'):
@@ -23,6 +22,7 @@ elif db_url.startswith('sqlite://'):
 else:
     raise ValueError("Only sqlite databases are supported by this script.")
 
+print(f"Database file path: {db_path}")
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 

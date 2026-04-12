@@ -5,7 +5,7 @@ Run this script to test the application with sample brokers, stocks, and holding
 
 from app import create_app
 from database import db
-from models.broker import Broker
+from models.account import Account
 from models.stock import Stock
 from models.holding import Holding
 from datetime import datetime
@@ -18,15 +18,15 @@ def seed_database():
         print("Clearing existing data...")
         Holding.query.delete()
         Stock.query.delete()
-        Broker.query.delete()
+        Account.query.delete()
         db.session.commit()
         
         # Create sample brokers
         print("Creating brokers...")
         brokers = [
-            Broker(name="Zerodha", description="Indian broker - NSE/BSE"),
-            Broker(name="Robinhood", description="US broker - NYSE/NASDAQ"),
-            Broker(name="Interactive Brokers", description="Global broker")
+            Account(name="Zerodha", description="Indian broker - NSE/BSE"),
+            Account(name="Robinhood", description="US broker - NYSE/NASDAQ"),
+            Account(name="Interactive Brokers", description="Global broker")
         ]
         
         for broker in brokers:
@@ -60,18 +60,18 @@ def seed_database():
         print("Creating holdings...")
         holdings = [
             # Zerodha holdings (Indian stocks)
-            Holding(broker_id=1, stock_id=1, quantity=10, average_price=2200.00),  # RELIANCE
-            Holding(broker_id=1, stock_id=2, quantity=5, average_price=3400.00),   # TCS
-            Holding(broker_id=1, stock_id=3, quantity=15, average_price=1450.00),  # INFY
+            Holding(account_id=1, stock_id=1, quantity=10, average_price=2200.00),  # RELIANCE
+            Holding(account_id=1, stock_id=2, quantity=5, average_price=3400.00),   # TCS
+            Holding(account_id=1, stock_id=3, quantity=15, average_price=1450.00),  # INFY
             
             # Robinhood holdings (US stocks)
-            Holding(broker_id=2, stock_id=5, quantity=20, average_price=150.00),   # AAPL
-            Holding(broker_id=2, stock_id=6, quantity=10, average_price=340.00),   # MSFT
-            Holding(broker_id=2, stock_id=8, quantity=8, average_price=220.00),    # TSLA
+            Holding(account_id=2, stock_id=5, quantity=20, average_price=150.00),   # AAPL
+            Holding(account_id=2, stock_id=6, quantity=10, average_price=340.00),   # MSFT
+            Holding(account_id=2, stock_id=8, quantity=8, average_price=220.00),    # TSLA
             
             # Interactive Brokers holdings (mixed)
-            Holding(broker_id=3, stock_id=4, quantity=25, average_price=1600.00),  # HDFCBANK
-            Holding(broker_id=3, stock_id=7, quantity=12, average_price=130.00)    # GOOGL
+            Holding(account_id=3, stock_id=4, quantity=25, average_price=1600.00),  # HDFCBANK
+            Holding(account_id=3, stock_id=7, quantity=12, average_price=130.00)    # GOOGL
         ]
         
         for holding in holdings:
