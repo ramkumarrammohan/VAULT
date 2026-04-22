@@ -2,7 +2,7 @@
 
 import { ref, computed, onMounted } from 'vue'
 import { portfolioApi, holdingApi, priceApi, accountApi, stockApi } from '@/services/api'
-import type { PortfolioSummary, Holding, Account, Stock } from '@/types'
+import type { PortfolioSummary, Holding, Account, Stock, ConsolidatedHolding } from '@/types'
 
 
 const summary = ref<PortfolioSummary | null>(null)
@@ -15,6 +15,7 @@ const sortBy = ref<string>('stock_symbol')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const updating = ref(false)
+const expandedStocks = ref<Set<number>>(new Set())
 
 const loadAccounts = async () => {
   try {
@@ -76,7 +77,17 @@ const getGainLossClass = (value: number) => {
   return 'neutral'
 }
 
-const filteredHoldings = computed(() => {
+const toggleExpand = (stockId: number) => {
+  const next = new Set(expandedStocks.value)
+  if (next.has(stockId)) {
+    next.delete(stockId)
+  } else {
+    next.add(stockId)
+  }
+  expandedStocks.value = next
+}
+
+const consolidatedHoldings = computed<ConsolidatedHolding[]>(() => {
   let filtered = holdings.value
 
   if (selectedAccountId.value) {
@@ -87,11 +98,42 @@ const filteredHoldings = computed(() => {
     filtered = filtered.filter(h => h.stock_id === selectedStockId.value)
   }
 
-  return filtered
+  const map = new Map<number, ConsolidatedHolding>()
+
+  for (const h of filtered) {
+    if (!map.has(h.stock_id)) {
+      map.set(h.stock_id, {
+        stock_id: h.stock_id,
+        stock_symbol: h.stock_symbol,
+        stock_name: h.stock_name,
+        current_price: h.current_price,
+        quantity: 0,
+        average_price: 0,
+        invested_value: 0,
+        current_value: 0,
+        gain_loss: 0,
+        gain_loss_percentage: 0,
+        sub_holdings: []
+      })
+    }
+    const entry = map.get(h.stock_id)!
+    entry.quantity += h.quantity
+    entry.invested_value += h.invested_value
+    entry.current_value += h.current_value
+    entry.gain_loss += h.gain_loss
+    entry.sub_holdings.push(h)
+  }
+
+  for (const entry of map.values()) {
+    entry.average_price = entry.quantity > 0 ? entry.invested_value / entry.quantity : 0
+    entry.gain_loss_percentage = entry.invested_value > 0 ? (entry.gain_loss / entry.invested_value) * 100 : 0
+  }
+
+  return Array.from(map.values())
 })
 
-const sortedHoldings = computed(() => {
-  const sorted = [...filteredHoldings.value]
+const sortedHoldings = computed<ConsolidatedHolding[]>(() => {
+  const sorted = [...consolidatedHoldings.value]
 
   sorted.sort((a, b) => {
     let aVal: any
@@ -101,10 +143,6 @@ const sortedHoldings = computed(() => {
       case 'stock_symbol':
         aVal = a.stock_symbol.toLowerCase()
         bVal = b.stock_symbol.toLowerCase()
-        break
-      case 'account_name':
-        aVal = a.account_name.toLowerCase()
-        bVal = b.account_name.toLowerCase()
         break
       case 'quantity':
         aVal = a.quantity
@@ -237,12 +275,6 @@ onMounted(() => {
                   {{ sortDirection === 'asc' ? '▲' : '▼' }}
                 </span>
               </th>
-              <th @click="setSortBy('account_name')" class="sortable">
-                Account
-                <span class="sort-indicator" v-if="sortBy === 'account_name'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
               <th @click="setSortBy('quantity')" class="sortable">
                 Quantity
                 <span class="sort-indicator" v-if="sortBy === 'quantity'">
@@ -282,24 +314,54 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="holding in sortedHoldings" :key="holding.id">
-              <td>
-                <strong>{{ holding.stock_symbol }}</strong>
-                <br />
-                <small>{{ holding.stock_name }}</small>
-              </td>
-              <td>{{ holding.account_name }}</td>
-              <td>{{ holding.quantity }}</td>
-              <td>{{ formatCurrency(holding.average_price) }}</td>
-              <td>{{ holding.current_price ? formatCurrency(holding.current_price) : 'N/A' }}</td>
-              <td>{{ formatCurrency(holding.invested_value) }}</td>
-              <td>{{ formatCurrency(holding.current_value) }}</td>
-              <td :class="getGainLossClass(holding.gain_loss)">
-                {{ formatCurrency(holding.gain_loss) }}
-                <br />
-                <small>({{ holding.gain_loss_percentage.toFixed(2) }}%)</small>
-              </td>
-            </tr>
+            <template v-for="holding in sortedHoldings" :key="holding.stock_id">
+              <!-- Consolidated parent row -->
+              <tr
+                class="consolidated-row"
+                :class="{ expanded: expandedStocks.has(holding.stock_id) }"
+                @click="toggleExpand(holding.stock_id)"
+              >
+                <td>
+                  <span class="expand-chevron">{{ expandedStocks.has(holding.stock_id) ? '▼' : '▶' }}</span>
+                  <strong>{{ holding.stock_symbol }}</strong>
+                  <br />
+                  <small>{{ holding.stock_name }}</small>
+                </td>
+                <td>{{ holding.quantity }}</td>
+                <td>{{ formatCurrency(holding.average_price) }}</td>
+                <td>{{ holding.current_price ? formatCurrency(holding.current_price) : 'N/A' }}</td>
+                <td>{{ formatCurrency(holding.invested_value) }}</td>
+                <td>{{ formatCurrency(holding.current_value) }}</td>
+                <td :class="getGainLossClass(holding.gain_loss)">
+                  {{ formatCurrency(holding.gain_loss) }}
+                  <br />
+                  <small>({{ holding.gain_loss_percentage.toFixed(2) }}%)</small>
+                </td>
+              </tr>
+              <!-- Per-account sub-rows -->
+              <template v-if="expandedStocks.has(holding.stock_id)">
+                <tr
+                  v-for="sub in holding.sub_holdings"
+                  :key="sub.account_id + '-' + sub.stock_id"
+                  class="sub-row"
+                >
+                  <td class="sub-account-cell">
+                    <span class="sub-indent">└</span>
+                    {{ sub.account_name }}
+                  </td>
+                  <td>{{ sub.quantity }}</td>
+                  <td>{{ formatCurrency(sub.average_price) }}</td>
+                  <td>{{ sub.current_price ? formatCurrency(sub.current_price) : 'N/A' }}</td>
+                  <td>{{ formatCurrency(sub.invested_value) }}</td>
+                  <td>{{ formatCurrency(sub.current_value) }}</td>
+                  <td :class="getGainLossClass(sub.gain_loss)">
+                    {{ formatCurrency(sub.gain_loss) }}
+                    <br />
+                    <small>({{ sub.gain_loss_percentage.toFixed(2) }}%)</small>
+                  </td>
+                </tr>
+              </template>
+            </template>
           </tbody>
         </table>
       </div>
@@ -484,6 +546,49 @@ h1 {
 
 .holdings-table tbody tr:hover {
   background-color: #f9f9f9;
+}
+
+.consolidated-row {
+  cursor: pointer;
+}
+
+.consolidated-row:hover {
+  background-color: #f0f7f4 !important;
+}
+
+.consolidated-row.expanded {
+  background-color: #e8f5ee;
+}
+
+.expand-chevron {
+  display: inline-block;
+  margin-right: 0.5rem;
+  font-size: 0.75rem;
+  color: #42b983;
+  transition: transform 0.2s;
+}
+
+.sub-row {
+  background-color: #fafafa;
+}
+
+.sub-row:hover {
+  background-color: #f0f0f0 !important;
+}
+
+.sub-row td {
+  font-size: 0.9rem;
+  color: #555;
+  border-bottom: 1px solid #efefef;
+}
+
+.sub-account-cell {
+  padding-left: 1.5rem !important;
+}
+
+.sub-indent {
+  color: #42b983;
+  margin-right: 0.4rem;
 }
 
 .holdings-table td strong {

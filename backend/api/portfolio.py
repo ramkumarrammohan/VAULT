@@ -12,7 +12,6 @@ bp = Blueprint('portfolio', __name__)
 
 def calculate_holdings_from_transactions():
 
-    print("Calculating holdings from transactions and corporate events...")  # Debug log
     """
     Calculate current holdings from transaction history and corporate events using FIFO lot tracking.
     """

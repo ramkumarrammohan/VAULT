@@ -45,6 +45,20 @@ export interface PortfolioSummary {
   accounts_count: number
 }
 
+export interface ConsolidatedHolding {
+  stock_id: number
+  stock_symbol: string
+  stock_name: string
+  current_price?: number
+  quantity: number
+  average_price: number
+  invested_value: number
+  current_value: number
+  gain_loss: number
+  gain_loss_percentage: number
+  sub_holdings: Holding[]
+}
+
 export interface AccountSummary {
   account_id: number
   account_name: string
