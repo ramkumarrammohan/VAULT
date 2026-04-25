@@ -34,15 +34,6 @@ export const stockApi = {
   fetchInfo: (symbol: string) => apiClient.get(`/prices/fetch/${symbol}`)
 }
 
-// Holdings API
-export const holdingApi = {
-  getAll: () => apiClient.get('/holdings/'),
-  getById: (id: number) => apiClient.get(`/holdings/${id}`),
-  create: (data: any) => apiClient.post('/holdings/', data),
-  update: (id: number, data: any) => apiClient.put(`/holdings/${id}`, data),
-  delete: (id: number) => apiClient.delete(`/holdings/${id}`)
-}
-
 // Portfolio API
 export const portfolioApi = {
   getHoldings: () => apiClient.get('/portfolio/holdings'),

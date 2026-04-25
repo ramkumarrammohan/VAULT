@@ -5,7 +5,6 @@ import AccountsView from '@/views/AccountsView.vue'
 import AccountFormView from '@/views/AccountFormView.vue'
 import StocksView from '@/views/StocksView.vue'
 import StockFormView from '@/views/StockFormView.vue'
-import HoldingFormView from '@/views/HoldingFormView.vue'
 import TransactionsView from '@/views/TransactionsView.vue'
 
 const router = createRouter({
@@ -45,16 +44,6 @@ const router = createRouter({
       path: '/stocks/edit/:id',
       name: 'stock-edit',
       component: StockFormView
-    },
-    {
-      path: '/holdings/add',
-      name: 'holding-add',
-      component: HoldingFormView
-    },
-    {
-      path: '/holdings/edit/:id',
-      name: 'holding-edit',
-      component: HoldingFormView
     },
     {
       path: '/transactions',

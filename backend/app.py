@@ -26,11 +26,10 @@ def create_app(config_name=None):
     from models import account, stock, holding, transaction, corporate_event
     
     # Register blueprints
-    from api import accounts, stocks, holdings, portfolio, prices, transactions, corporate_events
+    from api import accounts, stocks, portfolio, prices, transactions, corporate_events
 
     app.register_blueprint(accounts.bp, url_prefix=f"{app.config['API_PREFIX']}/accounts")
     app.register_blueprint(stocks.bp, url_prefix=f"{app.config['API_PREFIX']}/stocks")
-    app.register_blueprint(holdings.bp, url_prefix=f"{app.config['API_PREFIX']}/holdings")
     app.register_blueprint(portfolio.bp, url_prefix=f"{app.config['API_PREFIX']}/portfolio")
     app.register_blueprint(prices.bp, url_prefix=f"{app.config['API_PREFIX']}/prices")
     app.register_blueprint(transactions.bp, url_prefix=f"{app.config['API_PREFIX']}/transactions")

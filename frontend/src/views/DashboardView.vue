@@ -1,7 +1,7 @@
 <script setup lang="ts">
 
 import { ref, computed, onMounted } from 'vue'
-import { portfolioApi, holdingApi, priceApi, accountApi, stockApi } from '@/services/api'
+import { portfolioApi, priceApi, accountApi, stockApi } from '@/services/api'
 import type { PortfolioSummary, Holding, Account, Stock, ConsolidatedHolding } from '@/types'
 
 
@@ -263,8 +263,8 @@ onMounted(() => {
         </div>
 
         <div v-if="holdings.length === 0" class="empty-state">
-          <p>No holdings yet. Start by adding some stocks!</p>
-          <router-link to="/holdings/add" class="btn-primary">Add Holding</router-link>
+          <p>No holdings yet. Add transactions to see your portfolio.</p>
+          <router-link to="/transactions" class="btn-primary">Add Transaction</router-link>
         </div>
         <table v-else class="holdings-table">
           <thead>

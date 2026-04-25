@@ -1,7 +1,6 @@
 from flask import Blueprint, jsonify
 from database import db
 from models.transaction import Transaction
-from models.holding import Holding
 from models.account import Account
 from models.stock import Stock
 from models.corporate_event import CorporateEvent

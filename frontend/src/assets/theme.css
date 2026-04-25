@@ -6,7 +6,6 @@
 .stocks-page,
 .transactions-page,
 .stock-form,
-.holding-form,
 .account-form {
   background: var(--bg-primary) !important;
 }
@@ -50,8 +49,7 @@ table {
 
 thead,
 .stocks-table th,
-.transactions-table th,
-.holdings-table th {
+.transactions-table th {
   background-color: var(--bg-tertiary) !important;
 }
 
@@ -64,14 +62,8 @@ td, th {
 }
 
 /* Table cell strong text (stock names) */
-.stocks-table td strong,
-.holdings-table td strong {
+.stocks-table td strong {
   color: var(--text-primary) !important;
-}
-
-/* Table cell small text */
-.holdings-table td small {
-  color: var(--text-secondary) !important;
 }
 
 /* Transaction type badges - keep light theme colors for visibility */
