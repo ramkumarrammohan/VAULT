@@ -1,0 +1,22 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output (re-built inside Docker)
+dist/
+
+# Local env files
+.env
+.env.*
+.env.local
+.env.*.local
+
+# Test artifacts
+e2e/test-results/
+playwright-report/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -63,6 +63,82 @@ A personal portfolio tracker application for managing stock holdings across mult
    npm run dev
    ```
 
+## Docker — Production Deployment
+
+### 1. Build & Push Images (local machine)
+
+Run these after every code change:
+
+```powershell
+# Build
+docker build -t ramkumarrammohan/vault-backend:latest ./backend
+docker build -t ramkumarrammohan/vault-frontend:latest ./frontend
+
+# Push to Docker Hub
+docker login
+docker push ramkumarrammohan/vault-backend:latest
+docker push ramkumarrammohan/vault-frontend:latest
+```
+
+### 2. First-Time Server Setup
+
+```bash
+# Create MySQL data directory
+mkdir -p /home/ramkumar/Data/VAULT_DATA
+
+# Copy required files to server (no source code needed)
+scp docker-compose.yml backend/.env.prod user@<server-ip>:~/vault/
+
+# SSH into server
+ssh user@<server-ip>
+cd ~/vault
+
+# Start all containers
+docker compose up -d
+
+# Verify all 3 containers are running
+docker compose ps
+```
+
+### 3. Verify Deployment
+
+```bash
+curl http://localhost/health          # {"status": "ok"}
+curl http://localhost/api/accounts/   # returns JSON
+```
+
+### 4. Redeploy After Code Changes
+
+```bash
+# On the server — pull latest images and restart
+docker compose pull && docker compose up -d
+```
+
+### 5. Useful Operations
+
+```bash
+# View live logs
+docker compose logs -f
+
+# View backend logs only
+docker compose logs backend --tail 50
+
+# View MySQL logs
+docker compose logs vault_db --tail 20
+
+# Run database seed
+docker compose exec backend python seed.py
+
+# Stop all containers
+docker compose down
+
+# Stop and wipe MySQL data volume (destructive)
+docker compose down -v
+```
+
+> **Note:** `backend/.env.prod` contains secrets — never commit it to git.
+> Add it to `.gitignore` and copy it to the server separately.
+
 ## Features (MVP)
 
 - Track stock holdings across multiple brokers

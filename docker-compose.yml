@@ -1,0 +1,47 @@
+services:
+
+  # ── MySQL Database ──────────────────────────────────────────────────────────
+  vault_db:
+    image: mysql:8.0
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.prod
+    volumes:
+      - /home/ramkumar/Data/VAULT_DATA:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - vault_net
+
+  # ── Flask / Gunicorn Backend ────────────────────────────────────────────────
+  backend:
+    image: ramkumarrammohan/vault-backend:latest
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.prod
+    depends_on:
+      vault_db:
+        condition: service_healthy
+    expose:
+      - "5000"
+    networks:
+      - vault_net
+
+  # ── Nginx + Vue Frontend ────────────────────────────────────────────────────
+  frontend:
+    image: ramkumarrammohan/vault-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - vault_net
+
+networks:
+  vault_net:
+    driver: bridge
