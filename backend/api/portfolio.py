@@ -64,6 +64,33 @@ def calculate_holdings_from_transactions():
                         lots[0][0] -= remaining_sell
                         remaining_sell = 0
                 meta['total_fees'] += trans.fees
+            elif trans.transaction_type == 'TRANSFER':
+                dest_account_id = trans.transfer_to_account_id
+                if dest_account_id:
+                    dest_key = (dest_account_id, trans.stock_id)
+                    if dest_key not in lots_dict:
+                        lots_dict[dest_key] = deque()
+                        dest_account = Account.query.get(dest_account_id)
+                        meta_dict[dest_key] = {
+                            'account_id': dest_account_id,
+                            'account_name': dest_account.name if dest_account else '',
+                            'stock_id': trans.stock_id,
+                            'stock_symbol': trans.stock.symbol,
+                            'stock_name': trans.stock.name,
+                            'total_fees': 0.0,
+                        }
+                    # FIFO deduct from source, preserve cost basis in destination
+                    remaining = trans.quantity
+                    while remaining > 0 and lots:
+                        oldest_qty, oldest_price = lots[0]
+                        if oldest_qty <= remaining:
+                            lots_dict[dest_key].append([oldest_qty, oldest_price])
+                            remaining -= oldest_qty
+                            lots.popleft()
+                        else:
+                            lots_dict[dest_key].append([remaining, oldest_price])
+                            lots[0][0] -= remaining
+                            remaining = 0
             # Ignore SPLIT/DEMERGER in transaction table (handled by events)
         elif action_type == 'event':
             event = obj

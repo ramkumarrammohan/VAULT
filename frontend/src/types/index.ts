@@ -75,7 +75,7 @@ export interface Transaction {
   account_name: string
   stock_id: number
   stock_symbol: string
-  transaction_type: 'BUY' | 'SELL'
+  transaction_type: 'BUY' | 'SELL' | 'SPLIT' | 'DEMERGER' | 'TRANSFER'
   quantity: number
   price: number
   fees: number
@@ -83,6 +83,8 @@ export interface Transaction {
   transaction_date: string
   notes?: string
   created_at?: string
+  transfer_to_account_id?: number | null
+  transfer_to_account_name?: string | null
 }
 
 export interface CorporateEvent {
@@ -92,9 +94,9 @@ export interface CorporateEvent {
   event_type: string
   event_date: string
   ratio?: number | null
-  quantity?: number | null
-  amount?: number | null
   related_stock_id?: number | null
   related_stock_symbol?: string
+  parent_cost_pct?: number | null
+  demerged_cost_pct?: number | null
   notes?: string
 }

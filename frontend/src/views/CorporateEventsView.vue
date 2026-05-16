@@ -27,14 +27,6 @@
         <input type="number" step="any" v-model.number="form.ratio" />
       </div>
       <div>
-        <label>Quantity:</label>
-        <input type="number" step="any" v-model.number="form.quantity" />
-      </div>
-      <div>
-        <label>Amount:</label>
-        <input type="number" step="any" v-model.number="form.amount" />
-      </div>
-      <div>
         <label>Related Stock:</label>
         <select v-model.number="form.related_stock_id">
           <option :value="null">None</option>
@@ -68,8 +60,6 @@
           <th>Type</th>
           <th>Date</th>
           <th>Ratio</th>
-          <th>Quantity</th>
-          <th>Amount</th>
           <th>Related Stock</th>
           <th>Parent Cost %</th>
           <th>Demerged/Merged Cost %</th>
@@ -84,19 +74,77 @@
           <td>{{ event.event_type }}</td>
           <td>{{ event.event_date }}</td>
           <td>{{ event.ratio }}</td>
-          <td>{{ event.quantity }}</td>
-          <td>{{ event.amount }}</td>
           <td>{{ event.related_stock_symbol }}</td>
           <td>{{ event.parent_cost_pct }}</td>
           <td>{{ event.demerged_cost_pct }}</td>
           <td>{{ event.notes }}</td>
           <td>
-            <button @click="deleteEvent(event.id)">Delete</button>
+            <button class="btn-edit" @click="openEditModal(event)">Edit</button>
+            <button class="btn-delete" @click="deleteEvent(event.id!)">Delete</button>
           </td>
         </tr>
       </tbody>
     </table>
     <div v-else>No corporate events found.</div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
+    <div class="modal-content">
+      <h3>Edit Corporate Event</h3>
+      <form @submit.prevent="updateEvent" class="event-form">
+        <div>
+          <label>Stock:</label>
+          <select v-model.number="editForm.stock_id" required>
+            <option :value="0" disabled>Select Stock</option>
+            <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+              {{ stock.symbol }} - {{ stock.name }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <label>Type:</label>
+          <select v-model="editForm.event_type" required>
+            <option value="" disabled>Select Type</option>
+            <option v-for="type in eventTypes" :key="type" :value="type">{{ type }}</option>
+          </select>
+        </div>
+        <div>
+          <label>Date:</label>
+          <input type="date" v-model="editForm.event_date" required />
+        </div>
+        <div>
+          <label>Ratio:</label>
+          <input type="number" step="any" v-model.number="editForm.ratio" />
+        </div>
+        <div>
+          <label>Related Stock:</label>
+          <select v-model.number="editForm.related_stock_id">
+            <option :value="null">None</option>
+            <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+              {{ stock.symbol }} - {{ stock.name }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <label>Parent Cost %:</label>
+          <input type="number" step="any" v-model.number="editForm.parent_cost_pct" />
+        </div>
+        <div>
+          <label>Demerged/Merged Cost %:</label>
+          <input type="number" step="any" v-model.number="editForm.demerged_cost_pct" />
+        </div>
+        <div>
+          <label>Notes:</label>
+          <input type="text" v-model="editForm.notes" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" @click="showEditModal = false">Cancel</button>
+          <button type="submit" :disabled="submitting">{{ submitting ? 'Saving...' : 'Save Changes' }}</button>
+        </div>
+        <span v-if="error" class="error">{{ error }}</span>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -112,8 +160,6 @@ const form = ref<CorporateEvent>({
   event_type: '',
   event_date: '',
   ratio: null,
-  quantity: null,
-  amount: null,
   related_stock_id: null,
   parent_cost_pct: null,
   demerged_cost_pct: null,
@@ -121,6 +167,18 @@ const form = ref<CorporateEvent>({
 })
 const submitting = ref(false)
 const error = ref<string | null>(null)
+const editingEvent = ref<CorporateEvent | null>(null)
+const showEditModal = ref(false)
+const editForm = ref<CorporateEvent>({
+  stock_id: 0,
+  event_type: '',
+  event_date: '',
+  ratio: null,
+  related_stock_id: null,
+  parent_cost_pct: null,
+  demerged_cost_pct: null,
+  notes: ''
+})
 const eventTypes = [
   'SPLIT',
   'DEMERGER',
@@ -144,8 +202,7 @@ const resetForm = () => {
     event_type: '',
     event_date: '',
     ratio: null,
-    quantity: null,
-    amount: null,
+
     related_stock_id: null,
     parent_cost_pct: null,
     demerged_cost_pct: null,
@@ -163,14 +220,12 @@ const createEvent = async () => {
       return
     }
     if (!payload.ratio) payload.ratio = null
-    if (!payload.quantity) payload.quantity = null
-    if (!payload.amount) payload.amount = null
     if (!payload.related_stock_id) payload.related_stock_id = null
     await corporateEventApi.create(payload)
     fetchEvents()
     resetForm()
-  } catch (e: any) {
-    error.value = e.response?.data || 'Failed to create event'
+  } catch (e: unknown) {
+    error.value = (e as {response?: {data?: string}})?.response?.data || 'Failed to create event'
   } finally {
     submitting.value = false
   }
@@ -179,6 +234,38 @@ const deleteEvent = async (id: number) => {
   if (confirm('Delete this event?')) {
     await corporateEventApi.delete(id)
     fetchEvents()
+  }
+}
+const openEditModal = (event: CorporateEvent) => {
+  editingEvent.value = event
+  editForm.value = {
+    stock_id: event.stock_id,
+    event_type: event.event_type,
+    event_date: event.event_date,
+    ratio: event.ratio ?? null,
+    related_stock_id: event.related_stock_id ?? null,
+    parent_cost_pct: event.parent_cost_pct ?? null,
+    demerged_cost_pct: event.demerged_cost_pct ?? null,
+    notes: event.notes ?? ''
+  }
+  showEditModal.value = true
+}
+const updateEvent = async () => {
+  if (!editingEvent.value?.id) return
+  error.value = null
+  submitting.value = true
+  try {
+    const payload = { ...editForm.value }
+    if (!payload.ratio) payload.ratio = null
+    if (!payload.related_stock_id) payload.related_stock_id = null
+    await corporateEventApi.update(editingEvent.value.id, payload)
+    showEditModal.value = false
+    editingEvent.value = null
+    fetchEvents()
+  } catch (e: unknown) {
+    error.value = (e as {response?: {data?: string}})?.response?.data || 'Failed to update event'
+  } finally {
+    submitting.value = false
   }
 }
 onMounted(() => {
@@ -240,6 +327,10 @@ h2 {
   margin-top: 1.2rem;
   transition: background-color 0.3s;
 }
+.event-form .modal-actions button {
+  margin-top: 0;
+  flex: 1;
+}
 .event-form button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -293,7 +384,96 @@ tbody tr:hover {
   margin-top: 0.5rem;
 }
 
+.btn-edit {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-right: 0.4rem;
+}
+.btn-edit:hover {
+  background-color: #2980b9;
+}
+.btn-delete {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-delete:hover {
+  background-color: #c0392b;
+}
+.btn-cancel {
+  background-color: #95a5a6;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.btn-cancel:hover {
+  background-color: #7f8c8d;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: var(--bg-secondary, #fff);
+  border-radius: 8px;
+  padding: 2rem;
+  width: 90%;
+  max-width: 900px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modal-content h3 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1.25rem;
+  color: var(--text-primary, #2c3e50);
+}
+.modal-actions {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 100%;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.modal-content .event-form > div {
+  flex: 1 1 calc(50% - 0.5rem);
+  max-width: calc(50% - 0.5rem);
+  box-sizing: border-box;
+}
+
+.modal-content .event-form .modal-actions {
+  flex: 1 1 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
 @media (prefers-color-scheme: dark) {
+  .modal-content {
+    background: #232526;
+    color: #f1f1f1;
+  }
   .corporate-events-view {
     background: #181a1b;
   }

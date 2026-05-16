@@ -33,13 +33,7 @@
 
 ### Database Migration
 
-**If you have an existing database:**
-```bash
-cd backend
-python run_migration.py
-```
-
-**If you don't have a database yet:**
+Use Alembic migrations for both existing and new databases:
 ```bash
 cd backend
 flask db upgrade

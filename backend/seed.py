@@ -1,14 +1,14 @@
-"""
-Seed script to populate the database with sample data
-Run this script to test the application with sample brokers, stocks, and holdings
-"""
+"""Seed sample accounts, stocks, and transactions for local testing."""
 
 from app import create_app
 from database import db
 from models.account import Account
-from models.stock import Stock
 from models.holding import Holding
-from datetime import datetime
+from models.stock import Stock
+from models.transaction import Transaction
+from models.corporate_event import CorporateEvent
+from datetime import datetime, UTC
+
 
 def seed_database():
     app = create_app()
@@ -16,6 +16,8 @@ def seed_database():
     with app.app_context():
         # Clear existing data (optional - comment out if you want to keep existing data)
         print("Clearing existing data...")
+        Transaction.query.delete()
+        CorporateEvent.query.delete()
         Holding.query.delete()
         Stock.query.delete()
         Account.query.delete()
@@ -23,16 +25,18 @@ def seed_database():
         
         # Create sample brokers
         print("Creating brokers...")
-        brokers = [
+        accounts = [
             Account(name="Zerodha", description="Indian broker - NSE/BSE"),
             Account(name="Robinhood", description="US broker - NYSE/NASDAQ"),
             Account(name="Interactive Brokers", description="Global broker")
         ]
         
-        for broker in brokers:
-            db.session.add(broker)
+        for account in accounts:
+            db.session.add(account)
         db.session.commit()
-        print(f"Created {len(brokers)} brokers")
+        print(f"Created {len(accounts)} brokers")
+
+        accounts_by_name = {account.name: account for account in accounts}
         
         # Create sample stocks
         print("Creating stocks...")
@@ -51,38 +55,118 @@ def seed_database():
         ]
         
         for stock in stocks:
-            stock.last_updated = datetime.utcnow()
+            stock.last_updated = datetime.now(UTC).replace(tzinfo=None)
             db.session.add(stock)
         db.session.commit()
         print(f"Created {len(stocks)} stocks")
+
+        stocks_by_symbol = {stock.symbol: stock for stock in stocks}
         
-        # Create sample holdings
-        print("Creating holdings...")
-        holdings = [
-            # Zerodha holdings (Indian stocks)
-            Holding(account_id=1, stock_id=1, quantity=10, average_price=2200.00),  # RELIANCE
-            Holding(account_id=1, stock_id=2, quantity=5, average_price=3400.00),   # TCS
-            Holding(account_id=1, stock_id=3, quantity=15, average_price=1450.00),  # INFY
-            
-            # Robinhood holdings (US stocks)
-            Holding(account_id=2, stock_id=5, quantity=20, average_price=150.00),   # AAPL
-            Holding(account_id=2, stock_id=6, quantity=10, average_price=340.00),   # MSFT
-            Holding(account_id=2, stock_id=8, quantity=8, average_price=220.00),    # TSLA
-            
-            # Interactive Brokers holdings (mixed)
-            Holding(account_id=3, stock_id=4, quantity=25, average_price=1600.00),  # HDFCBANK
-            Holding(account_id=3, stock_id=7, quantity=12, average_price=130.00)    # GOOGL
+        # Create sample transactions.
+        # Dashboard holdings are derived from transaction history, not seeded Holding rows.
+        print("Creating transactions...")
+        transactions = [
+            Transaction(
+                account_id=accounts_by_name["Zerodha"].id,
+                stock_id=stocks_by_symbol["RELIANCE.NS"].id,
+                transaction_type="BUY",
+                quantity=10,
+                price=2200.00,
+                fees=15.00,
+                transaction_date=datetime(2025, 1, 10, 10, 0, 0),
+                notes="Initial Reliance position"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Zerodha"].id,
+                stock_id=stocks_by_symbol["TCS.NS"].id,
+                transaction_type="BUY",
+                quantity=5,
+                price=3400.00,
+                fees=12.00,
+                transaction_date=datetime(2025, 1, 18, 11, 15, 0),
+                notes="Long-term TCS buy"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Zerodha"].id,
+                stock_id=stocks_by_symbol["INFY.NS"].id,
+                transaction_type="BUY",
+                quantity=18,
+                price=1450.00,
+                fees=10.00,
+                transaction_date=datetime(2025, 2, 4, 9, 45, 0),
+                notes="Infosys accumulation"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Zerodha"].id,
+                stock_id=stocks_by_symbol["INFY.NS"].id,
+                transaction_type="SELL",
+                quantity=3,
+                price=1525.00,
+                fees=8.00,
+                transaction_date=datetime(2025, 3, 20, 14, 30, 0),
+                notes="Partial profit booking"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Robinhood"].id,
+                stock_id=stocks_by_symbol["AAPL"].id,
+                transaction_type="BUY",
+                quantity=20,
+                price=150.00,
+                fees=3.00,
+                transaction_date=datetime(2025, 1, 8, 16, 0, 0),
+                notes="Apple starter position"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Robinhood"].id,
+                stock_id=stocks_by_symbol["MSFT"].id,
+                transaction_type="BUY",
+                quantity=10,
+                price=340.00,
+                fees=3.00,
+                transaction_date=datetime(2025, 2, 11, 15, 0, 0),
+                notes="Microsoft buy"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Robinhood"].id,
+                stock_id=stocks_by_symbol["TSLA"].id,
+                transaction_type="BUY",
+                quantity=8,
+                price=220.00,
+                fees=4.00,
+                transaction_date=datetime(2025, 2, 25, 13, 20, 0),
+                notes="Tesla trade"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Interactive Brokers"].id,
+                stock_id=stocks_by_symbol["HDFCBANK.NS"].id,
+                transaction_type="BUY",
+                quantity=25,
+                price=1600.00,
+                fees=18.00,
+                transaction_date=datetime(2025, 1, 14, 10, 10, 0),
+                notes="Core banking position"
+            ),
+            Transaction(
+                account_id=accounts_by_name["Interactive Brokers"].id,
+                stock_id=stocks_by_symbol["GOOGL"].id,
+                transaction_type="BUY",
+                quantity=12,
+                price=130.00,
+                fees=5.00,
+                transaction_date=datetime(2025, 3, 5, 19, 0, 0),
+                notes="Alphabet buy"
+            )
         ]
-        
-        for holding in holdings:
-            db.session.add(holding)
+
+        for transaction in transactions:
+            db.session.add(transaction)
         db.session.commit()
-        print(f"Created {len(holdings)} holdings")
+        print(f"Created {len(transactions)} transactions")
         
         print("\n✅ Database seeded successfully!")
-        print(f"   - {len(brokers)} brokers")
+        print(f"   - {len(accounts)} brokers")
         print(f"   - {len(stocks)} stocks")
-        print(f"   - {len(holdings)} holdings")
+        print(f"   - {len(transactions)} transactions")
         print("\nYou can now access the application at http://localhost:5173")
 
 if __name__ == '__main__':

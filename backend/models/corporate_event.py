@@ -19,8 +19,6 @@ class CorporateEvent(db.Model):
     event_type = Column(Enum(CorporateEventType), nullable=False)
     event_date = Column(Date, nullable=False)
     ratio = Column(Float, nullable=True)  # For splits/mergers
-    quantity = Column(Float, nullable=True)  # For demergers/bonus
-    amount = Column(Float, nullable=True)  # For dividends
     related_stock_id = Column(Integer, ForeignKey('stocks.id'), nullable=True)  # For mergers/amalgamations
     parent_cost_pct = Column(Float, nullable=True)  # e.g., 86.49 for ITC after demerger
     demerged_cost_pct = Column(Float, nullable=True)  # e.g., 13.51 for ITC Hotels after demerger

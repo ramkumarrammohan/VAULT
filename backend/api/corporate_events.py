@@ -15,8 +15,6 @@ def serialize_event(event):
         'event_type': event.event_type.name,
         'event_date': event.event_date.isoformat(),
         'ratio': event.ratio,
-        'quantity': event.quantity,
-        'amount': event.amount,
         'related_stock_id': event.related_stock_id,
         'related_stock_symbol': event.related_stock.symbol if event.related_stock else None,
         'parent_cost_pct': event.parent_cost_pct,
@@ -47,8 +45,6 @@ def create_event():
             event_type=CorporateEventType[data['event_type']],
             event_date=event_date,
             ratio=data.get('ratio'),
-            quantity=data.get('quantity'),
-            amount=data.get('amount'),
             related_stock_id=data.get('related_stock_id'),
             parent_cost_pct=data.get('parent_cost_pct'),
             demerged_cost_pct=data.get('demerged_cost_pct'),
@@ -75,8 +71,6 @@ def update_event(event_id):
                 event_date = datetime.strptime(event_date, "%Y-%m-%d").date()
             event.event_date = event_date
         event.ratio = data.get('ratio', event.ratio)
-        event.quantity = data.get('quantity', event.quantity)
-        event.amount = data.get('amount', event.amount)
         event.related_stock_id = data.get('related_stock_id', event.related_stock_id)
         event.parent_cost_pct = data.get('parent_cost_pct', event.parent_cost_pct)
         event.demerged_cost_pct = data.get('demerged_cost_pct', event.demerged_cost_pct)

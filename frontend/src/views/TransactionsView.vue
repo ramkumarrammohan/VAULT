@@ -48,12 +48,13 @@ const nowLocalDateTimeInput = (): string => {
 const formData = ref({
   account_id: null as number | null,
   stock_id: null as number | null,
-  transaction_type: 'BUY' as 'BUY' | 'SELL',
+  transaction_type: 'BUY' as 'BUY' | 'SELL' | 'SPLIT' | 'DEMERGER' | 'TRANSFER',
   quantity: null as number | null,
   price: null as number | null,
   transaction_date: nowLocalDateTimeInput(),
   fees: 0,
-  notes: ''
+  notes: '',
+  transfer_to_account_id: null as number | null
 })
 
 const loadAccounts = async () => {
@@ -105,7 +106,7 @@ const openEditModal = (transaction: Transaction) => {
     transaction_date: toLocalDateTimeInput(transaction.transaction_date),
     fees: transaction.fees || 0,
     notes: transaction.notes || '',
-    // SPLIT/DEMERGER fields removed
+    transfer_to_account_id: transaction.transfer_to_account_id ?? null
   }
   showEditModal.value = true
 }
@@ -119,6 +120,7 @@ const updateTransaction = async () => {
   try {
     await transactionApi.update(editingTransactionId.value, {
       ...formData.value,
+      price: formData.value.transaction_type === 'TRANSFER' ? 0 : formData.value.price,
       transaction_date: toUTCISOString(formData.value.transaction_date)
     })
     showEditModal.value = false
@@ -156,7 +158,7 @@ const openAddModal = () => {
     transaction_date: nowLocalDateTimeInput(),
     fees: 0,
     notes: '',
-    // SPLIT/DEMERGER fields removed
+    transfer_to_account_id: null
   }
   showAddModal.value = true
 }
@@ -167,15 +169,25 @@ const submitTransaction = async () => {
     return
   }
 
-  // Price is required for BUY/SELL
-  if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
-    error.value = 'Price is required for BUY/SELL transactions'
-    return
-  }
-
-  if (formData.value.price === null || formData.value.price === undefined) {
-    error.value = 'Please enter a price'
-    return
+  if (formData.value.transaction_type === 'TRANSFER') {
+    if (!formData.value.transfer_to_account_id) {
+      error.value = 'Please select a destination account for TRANSFER'
+      return
+    }
+    if (formData.value.transfer_to_account_id === formData.value.account_id) {
+      error.value = 'Source and destination accounts must be different'
+      return
+    }
+  } else {
+    // Price is required for BUY/SELL
+    if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
+      error.value = 'Price is required for BUY/SELL transactions'
+      return
+    }
+    if (formData.value.price === null || formData.value.price === undefined) {
+      error.value = 'Please enter a price'
+      return
+    }
   }
 
   loading.value = true
@@ -187,11 +199,11 @@ const submitTransaction = async () => {
       stock_id: formData.value.stock_id,
       transaction_type: formData.value.transaction_type,
       quantity: formData.value.quantity,
-      price: formData.value.price,
+      price: formData.value.transaction_type === 'TRANSFER' ? 0 : formData.value.price,
       transaction_date: toUTCISOString(formData.value.transaction_date),
       fees: formData.value.fees || 0,
       notes: formData.value.notes || undefined,
-      // SPLIT/DEMERGER fields removed
+      transfer_to_account_id: formData.value.transfer_to_account_id || undefined
     })
     showAddModal.value = false
     await loadTransactions()
@@ -209,15 +221,25 @@ const submitAndReset = async () => {
     return
   }
 
-  // Price is required for BUY/SELL
-  if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
-    error.value = 'Price is required for BUY/SELL transactions'
-    return
-  }
-
-  if (formData.value.price === null || formData.value.price === undefined) {
-    error.value = 'Please enter a price'
-    return
+  if (formData.value.transaction_type === 'TRANSFER') {
+    if (!formData.value.transfer_to_account_id) {
+      error.value = 'Please select a destination account for TRANSFER'
+      return
+    }
+    if (formData.value.transfer_to_account_id === formData.value.account_id) {
+      error.value = 'Source and destination accounts must be different'
+      return
+    }
+  } else {
+    // Price is required for BUY/SELL
+    if ((formData.value.transaction_type === 'BUY' || formData.value.transaction_type === 'SELL') && !formData.value.price) {
+      error.value = 'Price is required for BUY/SELL transactions'
+      return
+    }
+    if (formData.value.price === null || formData.value.price === undefined) {
+      error.value = 'Please enter a price'
+      return
+    }
   }
 
   loading.value = true
@@ -229,11 +251,11 @@ const submitAndReset = async () => {
       stock_id: formData.value.stock_id,
       transaction_type: formData.value.transaction_type,
       quantity: formData.value.quantity,
-      price: formData.value.price,
+      price: formData.value.transaction_type === 'TRANSFER' ? 0 : formData.value.price,
       transaction_date: toUTCISOString(formData.value.transaction_date),
       fees: formData.value.fees || 0,
       notes: formData.value.notes || undefined,
-      // SPLIT/DEMERGER fields removed
+      transfer_to_account_id: formData.value.transfer_to_account_id || undefined
     })
 
     // Reset form but keep account and stock selections
@@ -247,7 +269,8 @@ const submitAndReset = async () => {
       price: null,
       transaction_date: nowLocalDateTimeInput(),
       fees: 0,
-      notes: ''
+      notes: '',
+      transfer_to_account_id: null
     }
 
     await loadTransactions()
@@ -363,9 +386,25 @@ const parseCSV = (file: File) => {
 
         // Validate transaction type
         const transType = row.transaction_type.toUpperCase()
-        if (transType !== 'BUY' && transType !== 'SELL') {
-          errors.push(`Row ${i}: Invalid transaction type "${row.transaction_type}"`)
+        if (!['BUY', 'SELL', 'TRANSFER'].includes(transType)) {
+          errors.push(`Row ${i}: Invalid transaction type "${row.transaction_type}" (use BUY, SELL, or TRANSFER)`)
           continue
+        }
+
+        // TRANSFER requires destination account
+        let transferToAccountId: number | undefined
+        if (transType === 'TRANSFER') {
+          const transferToName = row.transfer_to_account || ''
+          const destAccount = accounts.value.find(a => a.name.toLowerCase() === transferToName.toLowerCase())
+          if (!destAccount) {
+            errors.push(`Row ${i}: Destination account "${transferToName}" not found for TRANSFER`)
+            continue
+          }
+          if (destAccount.id === account.id) {
+            errors.push(`Row ${i}: Source and destination accounts must be different for TRANSFER`)
+            continue
+          }
+          transferToAccountId = destAccount.id
         }
 
         parsed.push({
@@ -375,10 +414,11 @@ const parseCSV = (file: File) => {
           stock_symbol: stock.symbol,
           transaction_type: transType,
           quantity: parseFloat(row.quantity),
-          price: parseFloat(row.price),
+          price: transType === 'TRANSFER' ? 0 : parseFloat(row.price),
           fees: row.fees ? parseFloat(row.fees) : 0,
           transaction_date: row.transaction_date,
-          notes: row.notes || ''
+          notes: row.notes || '',
+          transfer_to_account_id: transferToAccountId
         })
       }
 
@@ -431,7 +471,12 @@ const submitBulkTransactions = async () => {
 }
 
 const downloadTemplate = () => {
-  const template = 'account,stock_symbol,transaction_type,quantity,price,transaction_date,fees,notes\nMy Account,AAPL,BUY,10,150.50,2024-01-15,5.00,Sample transaction'
+  const template = [
+    'account,stock_symbol,transaction_type,quantity,price,transaction_date,fees,notes,transfer_to_account',
+    'My Account,AAPL,BUY,10,150.50,2024-01-15,5.00,Sample buy,',
+    'My Account,AAPL,SELL,5,180.00,2024-06-01,5.00,Sample sell,',
+    'Account 1,AAPL,TRANSFER,5,,2024-07-01,0,Transfer to account 2,Account 2'
+  ].join('\n')
   const blob = new Blob([template], { type: 'text/csv' })
   const url = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -511,13 +556,14 @@ onMounted(async () => {
               <span :class="['type-badge',
                 transaction.transaction_type === 'BUY' ? 'buy' :
                 transaction.transaction_type === 'SELL' ? 'sell' :
-                transaction.transaction_type === 'SPLIT' ? 'split' : 'demerger']
+                transaction.transaction_type === 'SPLIT' ? 'split' :
+                transaction.transaction_type === 'TRANSFER' ? 'transfer' : 'demerger']
               ">
                 {{ transaction.transaction_type }}
               </span>
-              <span v-if="transaction.transaction_type === 'DEMERGER' && (transaction as any).demerger_source_stock_symbol"
-                    class="demerger-info">
-                (from {{ (transaction as any).demerger_source_stock_symbol }})
+              <span v-if="transaction.transaction_type === 'TRANSFER' && transaction.transfer_to_account_name"
+                    class="transfer-info">
+                → {{ transaction.transfer_to_account_name }}
               </span>
             </td>
             <td>{{ transaction.quantity }}</td>
@@ -574,8 +620,23 @@ onMounted(async () => {
               <select id="transaction_type" v-model="formData.transaction_type" required>
                 <option value="BUY">BUY</option>
                 <option value="SELL">SELL</option>
+                <option value="TRANSFER">TRANSFER (Between Accounts)</option>
               </select>
             </div>
+          </div>
+
+          <div v-if="formData.transaction_type === 'TRANSFER'" class="form-group">
+            <label for="transfer_to_account">Transfer To Account *</label>
+            <select id="transfer_to_account" v-model.number="formData.transfer_to_account_id" required>
+              <option :value="null" disabled>Select destination account</option>
+              <option
+                v-for="account in accounts.filter(a => a.id !== formData.account_id)"
+                :key="account.id"
+                :value="account.id"
+              >
+                {{ account.name }}
+              </option>
+            </select>
           </div>
 
           <div class="form-row">
@@ -590,14 +651,14 @@ onMounted(async () => {
               />
             </div>
 
-            <div class="form-group">
+            <div v-if="formData.transaction_type !== 'TRANSFER'" class="form-group">
               <label for="price">Price *</label>
               <input
                 id="price"
                 v-model.number="formData.price"
                 type="number"
                 step="0.01"
-                required
+                :required="formData.transaction_type !== 'TRANSFER'"
               />
             </div>
           </div>
@@ -686,6 +747,7 @@ onMounted(async () => {
                 <option value="SELL">SELL</option>
                 <option value="SPLIT">SPLIT (Stock Split/Bonus)</option>
                 <option value="DEMERGER">DEMERGER</option>
+                <option value="TRANSFER">TRANSFER (Between Accounts)</option>
               </select>
             </div>
 
@@ -702,14 +764,14 @@ onMounted(async () => {
           </div>
 
           <div class="form-row">
-            <div class="form-group">
+            <div v-if="formData.transaction_type !== 'TRANSFER'" class="form-group">
               <label for="edit_price">Price *</label>
               <input
                 id="edit_price"
                 v-model.number="formData.price"
                 type="number"
                 step="0.01"
-                required
+                :required="formData.transaction_type !== 'TRANSFER'"
               />
             </div>
 
@@ -737,6 +799,20 @@ onMounted(async () => {
           </div>
 
 
+
+          <div v-if="formData.transaction_type === 'TRANSFER'" class="form-group">
+            <label for="edit_transfer_to_account">Transfer To Account *</label>
+            <select id="edit_transfer_to_account" v-model.number="formData.transfer_to_account_id" required>
+              <option :value="null" disabled>Select destination account</option>
+              <option
+                v-for="account in accounts.filter(a => a.id !== formData.account_id)"
+                :key="account.id"
+                :value="account.id"
+              >
+                {{ account.name }}
+              </option>
+            </select>
+          </div>
 
           <div class="form-group">
             <label for="edit_notes">Notes</label>
@@ -810,8 +886,11 @@ onMounted(async () => {
                   <td>{{ idx + 1 }}. {{ item.account_name }}</td>
                   <td>{{ item.stock_symbol }}</td>
                   <td>
-                    <span :class="['type-badge', item.transaction_type === 'BUY' ? 'buy' : 'sell']">
+                    <span :class="['type-badge', item.transaction_type === 'BUY' ? 'buy' : item.transaction_type === 'SELL' ? 'sell' : 'transfer']">
                       {{ item.transaction_type }}
+                    </span>
+                    <span v-if="item.transaction_type === 'TRANSFER' && item.transfer_to_account_id" class="transfer-info">
+                      → {{ accounts.find(a => a.id === item.transfer_to_account_id)?.name }}
                     </span>
                   </td>
                   <td>{{ item.quantity }}</td>
@@ -1042,10 +1121,22 @@ h1 {
   color: #0c5460;
 }
 
+.type-badge.transfer {
+  background-color: #e8d5f5;
+  color: #5a1e8a;
+}
+
 .demerger-info {
   font-size: 0.75rem;
   color: var(--text-secondary);
   margin-left: 0.5rem;
+}
+
+.transfer-info {
+  font-size: 0.75rem;
+  color: #5a1e8a;
+  margin-left: 0.5rem;
+  font-weight: 500;
 }
 
 .demerger-section {

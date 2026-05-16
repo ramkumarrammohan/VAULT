@@ -38,14 +38,21 @@ def create_transaction():
     """Create a new transaction"""
     data = request.get_json()
     
-    required_fields = ['account_id', 'stock_id', 'transaction_type', 'quantity', 'price', 'transaction_date']
+    required_fields = ['account_id', 'stock_id', 'transaction_type', 'quantity', 'transaction_date']
     if not data or not all(field in data for field in required_fields):
-        return jsonify({'error': 'account_id, stock_id, transaction_type, quantity, price, and transaction_date are required'}), 400
+        return jsonify({'error': 'account_id, stock_id, transaction_type, quantity, and transaction_date are required'}), 400
     
     # Validate transaction type
-    if data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER']:
-        return jsonify({'error': 'transaction_type must be BUY, SELL, SPLIT, or DEMERGER'}), 400
-    
+    if data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER', 'TRANSFER']:
+        return jsonify({'error': 'transaction_type must be BUY, SELL, SPLIT, DEMERGER, or TRANSFER'}), 400
+
+    # TRANSFER requires a destination account
+    if data['transaction_type'] == 'TRANSFER':
+        if not data.get('transfer_to_account_id'):
+            return jsonify({'error': 'transfer_to_account_id is required for TRANSFER transactions'}), 400
+        if data['transfer_to_account_id'] == data['account_id']:
+            return jsonify({'error': 'transfer_to_account_id must differ from account_id'}), 400
+
     # Verify account and stock exist
     account = Account.query.get(data['account_id'])
     stock = Stock.query.get(data['stock_id'])
@@ -69,17 +76,16 @@ def create_transaction():
         stock_id=data['stock_id'],
         transaction_type=data['transaction_type'],
         quantity=data['quantity'],
-        price=data['price'],
+        price=data.get('price', 0),
         transaction_date=transaction_date,
         fees=data.get('fees', 0),
         notes=data.get('notes'),
-        demerger_source_stock_id=data.get('demerger_source_stock_id'),
-        demerger_ratio=data.get('demerger_ratio')
+        transfer_to_account_id=data.get('transfer_to_account_id')
     )
-    
+
     db.session.add(transaction)
     db.session.commit()
-    
+
     return jsonify(transaction.to_dict()), 201
 
 
@@ -103,8 +109,8 @@ def update_transaction(transaction_id):
         transaction.stock_id = data['stock_id']
     
     if 'transaction_type' in data:
-        if data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER']:
-            return jsonify({'error': 'transaction_type must be BUY, SELL, SPLIT, or DEMERGER'}), 400
+        if data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER', 'TRANSFER']:
+            return jsonify({'error': 'transaction_type must be BUY, SELL, SPLIT, DEMERGER, or TRANSFER'}), 400
         transaction.transaction_type = data['transaction_type']
     
     if 'quantity' in data:
@@ -127,6 +133,7 @@ def update_transaction(transaction_id):
                     '%d/%m/%Y',
                     '%Y-%m-%dT%H:%M:%S',
                     '%Y-%m-%d %H:%M:%S',
+                    '%d-%m-%Y %H:%M:%S',
                 ]
                 
                 for fmt in date_formats:
@@ -156,17 +163,14 @@ def update_transaction(transaction_id):
     
     if 'notes' in data:
         transaction.notes = data['notes']
-    
-    if 'demerger_source_stock_id' in data:
-        if data['demerger_source_stock_id']:
-            source_stock = Stock.query.get(data['demerger_source_stock_id'])
-            if not source_stock:
-                return jsonify({'error': 'Source stock not found'}), 404
-        transaction.demerger_source_stock_id = data['demerger_source_stock_id']
-    
-    if 'demerger_ratio' in data:
-        transaction.demerger_ratio = data['demerger_ratio']
-    
+
+    if 'transfer_to_account_id' in data:
+        if data['transfer_to_account_id']:
+            dest_account = Account.query.get(data['transfer_to_account_id'])
+            if not dest_account:
+                return jsonify({'error': 'Destination account not found'}), 404
+        transaction.transfer_to_account_id = data['transfer_to_account_id']
+
     db.session.commit()
     return jsonify(transaction.to_dict())
 
@@ -233,12 +237,28 @@ def create_bulk_transactions():
                 continue
             
             # Validate transaction type
-            if trans_data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER']:
+            if trans_data['transaction_type'] not in ['BUY', 'SELL', 'SPLIT', 'DEMERGER', 'TRANSFER']:
                 errors.append({
                     'row': idx + 1,
-                    'error': 'transaction_type must be BUY, SELL, SPLIT, or DEMERGER'
+                    'error': 'transaction_type must be BUY, SELL, SPLIT, DEMERGER, or TRANSFER'
                 })
                 continue
+
+            # TRANSFER requires destination account
+            if trans_data['transaction_type'] == 'TRANSFER':
+                if not trans_data.get('transfer_to_account_id'):
+                    errors.append({
+                        'row': idx + 1,
+                        'error': 'transfer_to_account_id is required for TRANSFER transactions'
+                    })
+                    continue
+                dest_account = Account.query.get(trans_data['transfer_to_account_id'])
+                if not dest_account:
+                    errors.append({
+                        'row': idx + 1,
+                        'error': f'Destination account with id {trans_data["transfer_to_account_id"]} not found'
+                    })
+                    continue
             
             # Verify account and stock exist
             account = Account.query.get(trans_data['account_id'])
@@ -304,12 +324,11 @@ def create_bulk_transactions():
                 stock_id=trans_data['stock_id'],
                 transaction_type=trans_data['transaction_type'],
                 quantity=trans_data['quantity'],
-                price=trans_data['price'],
+                price=trans_data.get('price', 0),
                 transaction_date=transaction_date,
                 fees=trans_data.get('fees', 0),
                 notes=trans_data.get('notes'),
-                demerger_source_stock_id=trans_data.get('demerger_source_stock_id'),
-                demerger_ratio=trans_data.get('demerger_ratio')
+                transfer_to_account_id=trans_data.get('transfer_to_account_id')
             )
             
             db.session.add(transaction)

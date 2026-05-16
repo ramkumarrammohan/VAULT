@@ -23,11 +23,6 @@ class Stock(db.Model):
                                    backref='stock', 
                                    lazy=True, 
                                    cascade='all, delete-orphan')
-    # Transactions where this stock was the demerger source
-    demerger_transactions = db.relationship('Transaction',
-                                           foreign_keys='Transaction.demerger_source_stock_id',
-                                           backref='demerger_source_stock',
-                                           lazy=True)
     
     def to_dict(self):
         """Convert model to dictionary"""
