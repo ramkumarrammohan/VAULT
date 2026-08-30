@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockApi, priceApi } from '@/services/api'
 import type { Stock } from '@/types'
+import { formatCurrency } from '@/utils/currency'
 
 const router = useRouter()
 const stocks = ref<Stock[]>([])
@@ -76,12 +77,8 @@ const goToEdit = (id: number) => {
   router.push(`/stocks/edit/${id}`)
 }
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 2
-  }).format(value)
+const formatCurrencyValue = (value: number, currency?: string) => {
+  return formatCurrency(value, currency ?? 'INR')
 }
 
 const formatDate = (dateString: string | undefined) => {
@@ -126,6 +123,7 @@ onMounted(() => {
             <th>Name</th>
             <th>Exchange</th>
             <th>Sector</th>
+            <th>Currency</th>
             <th>Current Price</th>
             <th>Last Updated</th>
             <th>Actions</th>
@@ -137,7 +135,8 @@ onMounted(() => {
             <td>{{ stock.name }}</td>
             <td>{{ stock.exchange || 'N/A' }}</td>
             <td>{{ stock.sector || 'N/A' }}</td>
-            <td>{{ stock.current_price ? formatCurrency(stock.current_price) : 'N/A' }}</td>
+            <td>{{ stock.currency || 'N/A' }}</td>
+            <td>{{ stock.current_price ? formatCurrencyValue(stock.current_price, stock.currency) : 'N/A' }}</td>
             <td>{{ formatDate(stock.last_updated) }}</td>
             <td class="actions">
               <button @click="refreshPrice(stock.id, stock.symbol)" class="btn-refresh" :disabled="isRefreshing(stock.id)">

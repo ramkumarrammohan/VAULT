@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { transactionApi, accountApi, stockApi } from '@/services/api'
 import type { Transaction, Account, Stock } from '@/types'
+import { formatCurrency } from '@/utils/currency'
 
 const router = useRouter()
 const transactions = ref<Transaction[]>([])
@@ -282,12 +283,9 @@ const submitAndReset = async () => {
   }
 }
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 2
-  }).format(value)
+const formatCurrencyForStock = (value: number, stockId: number | null) => {
+  const stock = stocks.value.find(s => s.id === stockId)
+  return formatCurrency(value, stock?.currency ?? 'INR')
 }
 
 const formatDate = (dateString: string) => {
@@ -567,9 +565,9 @@ onMounted(async () => {
               </span>
             </td>
             <td>{{ transaction.quantity }}</td>
-            <td>{{ formatCurrency(transaction.price) }}</td>
-            <td>{{ formatCurrency(transaction.fees) }}</td>
-            <td>{{ formatCurrency(transaction.total_value) }}</td>
+            <td>{{ formatCurrencyForStock(transaction.price, transaction.stock_id) }}</td>
+            <td>{{ formatCurrencyForStock(transaction.fees, transaction.stock_id) }}</td>
+            <td>{{ formatCurrencyForStock(transaction.total_value, transaction.stock_id) }}</td>
             <td>{{ transaction.notes || '-' }}</td>
             <td class="actions">
               <button @click="openEditModal(transaction)" class="btn-edit-small">Edit</button>
@@ -894,8 +892,8 @@ onMounted(async () => {
                     </span>
                   </td>
                   <td>{{ item.quantity }}</td>
-                  <td>{{ formatCurrency(item.price) }}</td>
-                  <td>{{ formatCurrency(item.fees) }}</td>
+                  <td>{{ formatCurrencyForStock(item.price, item.stock_id) }}</td>
+                  <td>{{ formatCurrencyForStock(item.fees, item.stock_id) }}</td>
                   <td>{{ item.transaction_date }}</td>
                   <td>{{ item.notes || '-' }}</td>
                 </tr>

@@ -12,6 +12,7 @@ class Stock(db.Model):
     name = db.Column(db.String(255), nullable=False)
     exchange = db.Column(db.String(50))  # NSE, BSE, NYSE, NASDAQ, etc.
     sector = db.Column(db.String(100))
+    currency = db.Column(db.String(3))  # INR, USD, etc.
     current_price = db.Column(db.Float)
     last_updated = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -32,6 +33,7 @@ class Stock(db.Model):
             'name': self.name,
             'exchange': self.exchange,
             'sector': self.sector,
+            'currency': self.currency,
             'current_price': self.current_price,
             'last_updated': self.last_updated.isoformat() + 'Z' if self.last_updated else None,
             'created_at': self.created_at.isoformat() + 'Z' if self.created_at else None

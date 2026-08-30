@@ -5,11 +5,28 @@ from datetime import datetime
 
 bp = Blueprint('stocks', __name__)
 
+# Maps known exchange codes to their base currency
+_EXCHANGE_CURRENCY = {
+    'NSE': 'INR', 'BSE': 'INR',
+    'NYSE': 'USD', 'NASDAQ': 'USD', 'NMS': 'USD', 'NYQ': 'USD',
+    'NGM': 'USD', 'NCM': 'USD', 'ASE': 'USD',
+}
+
+
+def _infer_currency(symbol: str, exchange: str | None) -> str | None:
+    """Infer currency from exchange code or symbol suffix."""
+    if exchange and exchange.upper() in _EXCHANGE_CURRENCY:
+        return _EXCHANGE_CURRENCY[exchange.upper()]
+    sym = (symbol or '').upper()
+    if sym.endswith('.NS') or sym.endswith('.BO'):
+        return 'INR'
+    return None
+
 
 @bp.route('/', methods=['GET'])
 def get_stocks():
     """Get all stocks"""
-    stocks = Stock.query.all()
+    stocks = Stock.query.order_by(Stock.name.asc()).all()
     return jsonify([stock.to_dict() for stock in stocks])
 
 
@@ -38,6 +55,7 @@ def create_stock():
         name=data['name'],
         exchange=data.get('exchange'),
         sector=data.get('sector'),
+        currency=data.get('currency') or _infer_currency(data['symbol'], data.get('exchange')),
         current_price=data.get('current_price'),
         last_updated=datetime.utcnow() if data.get('current_price') else None
     )
@@ -62,6 +80,12 @@ def update_stock(stock_id):
         stock.exchange = data['exchange']
     if 'sector' in data:
         stock.sector = data['sector']
+    if 'currency' in data:
+        # Explicit override takes precedence; empty string clears back to auto-detect
+        stock.currency = data['currency'] or _infer_currency(stock.symbol, stock.exchange)
+    elif 'exchange' in data and not stock.currency:
+        # Re-infer when exchange changes and currency wasn't set before
+        stock.currency = _infer_currency(stock.symbol, data['exchange'])
     if 'current_price' in data:
         stock.current_price = data['current_price']
         stock.last_updated = datetime.utcnow()
