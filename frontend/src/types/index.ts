@@ -12,6 +12,7 @@ export interface Stock {
   name: string
   exchange?: string
   sector?: string
+  currency?: string
   current_price?: number
   last_updated?: string
   created_at?: string
@@ -24,6 +25,7 @@ export interface Holding {
   stock_id: number
   stock_symbol: string
   stock_name: string
+  currency?: string
   quantity: number
   average_price: number
   current_price?: number
@@ -36,11 +38,16 @@ export interface Holding {
   updated_at?: string
 }
 
-export interface PortfolioSummary {
+export interface CurrencySummary {
   total_invested: number
   total_current_value: number
   total_gain_loss: number
   total_gain_loss_percentage: number
+  holdings_count: number
+}
+
+export interface PortfolioSummary {
+  by_currency: Record<string, CurrencySummary>
   holdings_count: number
   accounts_count: number
 }
@@ -49,6 +56,7 @@ export interface ConsolidatedHolding {
   stock_id: number
   stock_symbol: string
   stock_name: string
+  currency?: string
   current_price?: number
   quantity: number
   average_price: number

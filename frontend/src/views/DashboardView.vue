@@ -3,6 +3,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { portfolioApi, priceApi, accountApi, stockApi } from '@/services/api'
 import type { PortfolioSummary, Holding, Account, Stock, ConsolidatedHolding } from '@/types'
+import { formatCurrency } from '@/utils/currency'
+import HoldingsTable from '@/components/HoldingsTable.vue'
 
 
 const summary = ref<PortfolioSummary | null>(null)
@@ -63,14 +65,6 @@ const updateAllPrices = async () => {
   }
 }
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 2
-  }).format(value)
-}
-
 const getGainLossClass = (value: number) => {
   if (value > 0) return 'positive'
   if (value < 0) return 'negative'
@@ -87,6 +81,7 @@ const toggleExpand = (stockId: number) => {
   expandedStocks.value = next
 }
 
+// Build consolidated holdings map grouped by currency
 const consolidatedHoldings = computed<ConsolidatedHolding[]>(() => {
   let filtered = holdings.value
 
@@ -106,6 +101,7 @@ const consolidatedHoldings = computed<ConsolidatedHolding[]>(() => {
         stock_id: h.stock_id,
         stock_symbol: h.stock_symbol,
         stock_name: h.stock_name,
+        currency: h.currency,
         current_price: h.current_price,
         quantity: 0,
         average_price: 0,
@@ -132,9 +128,19 @@ const consolidatedHoldings = computed<ConsolidatedHolding[]>(() => {
   return Array.from(map.values())
 })
 
-const sortedHoldings = computed<ConsolidatedHolding[]>(() => {
-  const sorted = [...consolidatedHoldings.value]
+// Split consolidated holdings by currency
+const inrHoldings = computed(() =>
+  consolidatedHoldings.value.filter(h => (h.currency ?? 'INR') === 'INR')
+)
+const usdHoldings = computed(() =>
+  consolidatedHoldings.value.filter(h => h.currency === 'USD')
+)
+const otherHoldings = computed(() =>
+  consolidatedHoldings.value.filter(h => h.currency && h.currency !== 'INR' && h.currency !== 'USD')
+)
 
+const sortHoldings = (list: ConsolidatedHolding[]) => {
+  const sorted = [...list]
   sorted.sort((a, b) => {
     let aVal: any
     let bVal: any
@@ -145,33 +151,19 @@ const sortedHoldings = computed<ConsolidatedHolding[]>(() => {
         bVal = b.stock_symbol.toLowerCase()
         break
       case 'quantity':
-        aVal = a.quantity
-        bVal = b.quantity
-        break
+        aVal = a.quantity; bVal = b.quantity; break
       case 'average_price':
-        aVal = a.average_price
-        bVal = b.average_price
-        break
+        aVal = a.average_price; bVal = b.average_price; break
       case 'current_price':
-        aVal = a.current_price || 0
-        bVal = b.current_price || 0
-        break
+        aVal = a.current_price || 0; bVal = b.current_price || 0; break
       case 'invested_value':
-        aVal = a.invested_value
-        bVal = b.invested_value
-        break
+        aVal = a.invested_value; bVal = b.invested_value; break
       case 'current_value':
-        aVal = a.current_value
-        bVal = b.current_value
-        break
+        aVal = a.current_value; bVal = b.current_value; break
       case 'gain_loss':
-        aVal = a.gain_loss
-        bVal = b.gain_loss
-        break
+        aVal = a.gain_loss; bVal = b.gain_loss; break
       case 'gain_loss_percentage':
-        aVal = a.gain_loss_percentage
-        bVal = b.gain_loss_percentage
-        break
+        aVal = a.gain_loss_percentage; bVal = b.gain_loss_percentage; break
       default:
         return 0
     }
@@ -180,9 +172,12 @@ const sortedHoldings = computed<ConsolidatedHolding[]>(() => {
     if (aVal > bVal) return sortDirection.value === 'asc' ? 1 : -1
     return 0
   })
-
   return sorted
-})
+}
+
+const sortedInrHoldings = computed(() => sortHoldings(inrHoldings.value))
+const sortedUsdHoldings = computed(() => sortHoldings(usdHoldings.value))
+const sortedOtherHoldings = computed(() => sortHoldings(otherHoldings.value))
 
 const setSortBy = (column: string) => {
   if (sortBy.value === column) {
@@ -216,155 +211,97 @@ onMounted(() => {
     <div v-if="loading" class="loading">Loading...</div>
 
     <div v-else-if="summary" class="content">
+
+      <!-- Overview counts -->
       <div class="summary-cards">
-        <div class="card">
-          <h3>Total Invested</h3>
-          <p class="value">{{ formatCurrency(summary.total_invested) }}</p>
-        </div>
-        <div class="card">
-          <h3>Current Value</h3>
-          <p class="value">{{ formatCurrency(summary.total_current_value) }}</p>
-        </div>
-        <div class="card">
-          <h3>Total Gain/Loss</h3>
-          <p class="value" :class="getGainLossClass(summary.total_gain_loss)">
-            {{ formatCurrency(summary.total_gain_loss) }}
-            ({{ summary.total_gain_loss_percentage.toFixed(2) }}%)
-          </p>
-        </div>
         <div class="card">
           <h3>Holdings</h3>
           <p class="value">{{ summary.holdings_count }} across {{ summary.accounts_count }} accounts</p>
         </div>
+        <div v-for="(cur, code) in summary.by_currency" :key="code" class="card currency-card">
+          <h3>{{ code === 'INR' ? '🇮🇳' : code === 'USD' ? '🇺🇸' : '🌐' }} {{ code }} Portfolio</h3>
+          <p class="value">{{ formatCurrency(cur.total_current_value, code) }}</p>
+          <p class="sub-value" :class="getGainLossClass(cur.total_gain_loss)">
+            {{ formatCurrency(cur.total_gain_loss, code) }}
+            ({{ cur.total_gain_loss_percentage.toFixed(2) }}%)
+          </p>
+          <p class="sub-label">Invested: {{ formatCurrency(cur.total_invested, code) }}</p>
+        </div>
       </div>
 
-      <!-- Holdings Table -->
-      <div class="holdings-section">
-        <h2>Your Holdings</h2>
-        <div class="filter-section">
-          <div class="filter-group">
-            <label for="account-filter">Filter by Account:</label>
-            <select id="account-filter" v-model.number="selectedAccountId">
-              <option :value="null">All Accounts</option>
-              <option v-for="account in accounts" :key="account.id" :value="account.id">
-                {{ account.name }}
-              </option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label for="stock-filter">Filter by Stock:</label>
-            <select id="stock-filter" v-model.number="selectedStockId">
-              <option :value="null">All Stocks</option>
-              <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
-                {{ stock.symbol }} - {{ stock.name }}
-              </option>
-            </select>
-          </div>
+      <!-- Filter bar (shared) -->
+      <div class="filter-section">
+        <div class="filter-group">
+          <label for="account-filter">Filter by Account:</label>
+          <select id="account-filter" v-model.number="selectedAccountId">
+            <option :value="null">All Accounts</option>
+            <option v-for="account in accounts" :key="account.id" :value="account.id">
+              {{ account.name }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="stock-filter">Filter by Stock:</label>
+          <select id="stock-filter" v-model.number="selectedStockId">
+            <option :value="null">All Stocks</option>
+            <option v-for="stock in stocks" :key="stock.id" :value="stock.id">
+              {{ stock.symbol }} - {{ stock.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <div v-if="holdings.length === 0" class="empty-state">
+        <p>No holdings yet. Add transactions to see your portfolio.</p>
+        <router-link to="/transactions" class="btn-primary">Add Transaction</router-link>
+      </div>
+
+      <template v-else>
+        <!-- INR section -->
+        <div v-if="sortedInrHoldings.length > 0" class="holdings-section">
+          <h2>🇮🇳 Indian Portfolio <span class="currency-badge">INR</span></h2>
+          <HoldingsTable
+            :holdings="sortedInrHoldings"
+            currency="INR"
+            :sort-by="sortBy"
+            :sort-direction="sortDirection"
+            :expanded-stocks="expandedStocks"
+            @sort="setSortBy"
+            @toggle-expand="toggleExpand"
+            :get-gain-loss-class="getGainLossClass"
+          />
         </div>
 
-        <div v-if="holdings.length === 0" class="empty-state">
-          <p>No holdings yet. Add transactions to see your portfolio.</p>
-          <router-link to="/transactions" class="btn-primary">Add Transaction</router-link>
+        <!-- USD section -->
+        <div v-if="sortedUsdHoldings.length > 0" class="holdings-section">
+          <h2>🇺🇸 US Portfolio <span class="currency-badge">USD</span></h2>
+          <HoldingsTable
+            :holdings="sortedUsdHoldings"
+            currency="USD"
+            :sort-by="sortBy"
+            :sort-direction="sortDirection"
+            :expanded-stocks="expandedStocks"
+            @sort="setSortBy"
+            @toggle-expand="toggleExpand"
+            :get-gain-loss-class="getGainLossClass"
+          />
         </div>
-        <table v-else class="holdings-table">
-          <thead>
-            <tr>
-              <th @click="setSortBy('stock_symbol')" class="sortable">
-                Stock
-                <span class="sort-indicator" v-if="sortBy === 'stock_symbol'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-              <th @click="setSortBy('quantity')" class="sortable">
-                Quantity
-                <span class="sort-indicator" v-if="sortBy === 'quantity'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-              <th @click="setSortBy('average_price')" class="sortable">
-                Avg Price
-                <span class="sort-indicator" v-if="sortBy === 'average_price'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-              <th @click="setSortBy('current_price')" class="sortable">
-                Current Price
-                <span class="sort-indicator" v-if="sortBy === 'current_price'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-              <th @click="setSortBy('invested_value')" class="sortable">
-                Invested
-                <span class="sort-indicator" v-if="sortBy === 'invested_value'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-              <th @click="setSortBy('current_value')" class="sortable">
-                Current Value
-                <span class="sort-indicator" v-if="sortBy === 'current_value'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-              <th @click="setSortBy('gain_loss')" class="sortable">
-                Gain/Loss
-                <span class="sort-indicator" v-if="sortBy === 'gain_loss'">
-                  {{ sortDirection === 'asc' ? '▲' : '▼' }}
-                </span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="holding in sortedHoldings" :key="holding.stock_id">
-              <!-- Consolidated parent row -->
-              <tr
-                class="consolidated-row"
-                :class="{ expanded: expandedStocks.has(holding.stock_id) }"
-                @click="toggleExpand(holding.stock_id)"
-              >
-                <td>
-                  <span class="expand-chevron">{{ expandedStocks.has(holding.stock_id) ? '▼' : '▶' }}</span>
-                  <strong>{{ holding.stock_symbol }}</strong>
-                  <br />
-                  <small>{{ holding.stock_name }}</small>
-                </td>
-                <td>{{ holding.quantity }}</td>
-                <td>{{ formatCurrency(holding.average_price) }}</td>
-                <td>{{ holding.current_price ? formatCurrency(holding.current_price) : 'N/A' }}</td>
-                <td>{{ formatCurrency(holding.invested_value) }}</td>
-                <td>{{ formatCurrency(holding.current_value) }}</td>
-                <td :class="getGainLossClass(holding.gain_loss)">
-                  {{ formatCurrency(holding.gain_loss) }}
-                  <br />
-                  <small>({{ holding.gain_loss_percentage.toFixed(2) }}%)</small>
-                </td>
-              </tr>
-              <!-- Per-account sub-rows -->
-              <template v-if="expandedStocks.has(holding.stock_id)">
-                <tr
-                  v-for="sub in holding.sub_holdings"
-                  :key="sub.account_id + '-' + sub.stock_id"
-                  class="sub-row"
-                >
-                  <td class="sub-account-cell">
-                    <span class="sub-indent">└</span>
-                    {{ sub.account_name }}
-                  </td>
-                  <td>{{ sub.quantity }}</td>
-                  <td>{{ formatCurrency(sub.average_price) }}</td>
-                  <td>{{ sub.current_price ? formatCurrency(sub.current_price) : 'N/A' }}</td>
-                  <td>{{ formatCurrency(sub.invested_value) }}</td>
-                  <td>{{ formatCurrency(sub.current_value) }}</td>
-                  <td :class="getGainLossClass(sub.gain_loss)">
-                    {{ formatCurrency(sub.gain_loss) }}
-                    <br />
-                    <small>({{ sub.gain_loss_percentage.toFixed(2) }}%)</small>
-                  </td>
-                </tr>
-              </template>
-            </template>
-          </tbody>
-        </table>
-      </div>
+
+        <!-- Other currencies -->
+        <div v-if="sortedOtherHoldings.length > 0" class="holdings-section">
+          <h2>🌐 Other Holdings</h2>
+          <HoldingsTable
+            :holdings="sortedOtherHoldings"
+            :currency="sortedOtherHoldings[0]?.currency ?? 'USD'"
+            :sort-by="sortBy"
+            :sort-direction="sortDirection"
+            :expanded-stocks="expandedStocks"
+            @sort="setSortBy"
+            @toggle-expand="toggleExpand"
+            :get-gain-loss-class="getGainLossClass"
+          />
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -442,6 +379,30 @@ h1 {
   font-size: 1.8rem;
   font-weight: bold;
   color: #2c3e50;
+}
+
+.currency-card .sub-value {
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.currency-card .sub-label {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.currency-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #42b983;
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 0.4rem;
 }
 
 .positive {

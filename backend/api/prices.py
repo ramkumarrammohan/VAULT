@@ -58,6 +58,17 @@ def update_stock_price(symbol):
         if current_price:
             stock.current_price = float(current_price)
             stock.last_updated = datetime.utcnow()
+
+            # Also save currency if not already set
+            if not stock.currency:
+                try:
+                    info = yf.Ticker(symbol).fast_info
+                    fetched_currency = getattr(info, 'currency', None)
+                    if fetched_currency:
+                        stock.currency = fetched_currency.upper()
+                except Exception:
+                    pass
+
             db.session.commit()
             
             # Update cooldown tracker

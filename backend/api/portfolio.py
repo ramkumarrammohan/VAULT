@@ -199,6 +199,7 @@ def calculate_holdings_from_transactions():
             'stock_id': meta['stock_id'],
             'stock_symbol': meta['stock_symbol'],
             'stock_name': meta['stock_name'],
+            'currency': stock.currency if stock else None,
             'quantity': round(total_qty, 4),
             'average_price': round(average_price, 2),
             'current_price': round(current_price, 2),
@@ -221,31 +222,46 @@ def get_holdings():
 
 @bp.route('/summary', methods=['GET'])
 def get_portfolio_summary():
-    """Get overall portfolio summary"""
+    """Get overall portfolio summary, split by currency"""
     holdings = calculate_holdings_from_transactions()
-    
+
     if not holdings:
         return jsonify({
-            'total_invested': 0,
-            'total_current_value': 0,
-            'total_gain_loss': 0,
-            'total_gain_loss_percentage': 0,
+            'by_currency': {},
             'holdings_count': 0,
             'accounts_count': 0
         })
-    
-    total_invested = sum(h['invested_value'] for h in holdings)
-    total_current_value = sum(h['current_value'] for h in holdings)
-    total_gain_loss = total_current_value - total_invested
-    total_gain_loss_percentage = (total_gain_loss / total_invested * 100) if total_invested > 0 else 0
-    
+
+    # Group by currency
+    currency_buckets: dict = {}
+    for h in holdings:
+        cur = h.get('currency') or 'OTHER'
+        if cur not in currency_buckets:
+            currency_buckets[cur] = {
+                'total_invested': 0.0,
+                'total_current_value': 0.0,
+                'holdings_count': 0,
+            }
+        currency_buckets[cur]['total_invested'] += h['invested_value']
+        currency_buckets[cur]['total_current_value'] += h['current_value']
+        currency_buckets[cur]['holdings_count'] += 1
+
+    by_currency = {}
+    for cur, data in currency_buckets.items():
+        gain_loss = data['total_current_value'] - data['total_invested']
+        gain_loss_pct = (gain_loss / data['total_invested'] * 100) if data['total_invested'] > 0 else 0
+        by_currency[cur] = {
+            'total_invested': round(data['total_invested'], 2),
+            'total_current_value': round(data['total_current_value'], 2),
+            'total_gain_loss': round(gain_loss, 2),
+            'total_gain_loss_percentage': round(gain_loss_pct, 2),
+            'holdings_count': data['holdings_count'],
+        }
+
     accounts_count = len(set(h['account_id'] for h in holdings))
-    
+
     return jsonify({
-        'total_invested': round(total_invested, 2),
-        'total_current_value': round(total_current_value, 2),
-        'total_gain_loss': round(total_gain_loss, 2),
-        'total_gain_loss_percentage': round(total_gain_loss_percentage, 2),
+        'by_currency': by_currency,
         'holdings_count': len(holdings),
         'accounts_count': accounts_count
     })

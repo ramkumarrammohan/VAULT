@@ -13,11 +13,32 @@ const formData = ref({
   name: '',
   exchange: '',
   sector: '',
+  currency: '',
   current_price: null as number | null
 })
 const loading = ref(false)
 const lookingUp = ref(false)
 const error = ref<string | null>(null)
+
+const EXCHANGE_CURRENCY: Record<string, string> = {
+  NSE: 'INR', BSE: 'INR',
+  NYSE: 'USD', NASDAQ: 'USD', NMS: 'USD', NYQ: 'USD', NGM: 'USD', NCM: 'USD', ASE: 'USD',
+}
+
+const inferCurrency = (symbol: string, exchange: string): string => {
+  if (exchange && EXCHANGE_CURRENCY[exchange.toUpperCase()]) {
+    return EXCHANGE_CURRENCY[exchange.toUpperCase()]
+  }
+  const sym = symbol.toUpperCase()
+  if (sym.endsWith('.NS') || sym.endsWith('.BO')) return 'INR'
+  return ''
+}
+
+const onExchangeChange = () => {
+  if (!formData.value.currency) {
+    formData.value.currency = inferCurrency(formData.value.symbol, formData.value.exchange)
+  }
+}
 
 const loadStock = async (id: number) => {
   loading.value = true
@@ -28,6 +49,7 @@ const loadStock = async (id: number) => {
       name: response.data.name,
       exchange: response.data.exchange || '',
       sector: response.data.sector || '',
+      currency: response.data.currency || '',
       current_price: response.data.current_price
     }
   } catch (err: any) {
@@ -60,6 +82,12 @@ const lookupStock = async () => {
     if (data.sector) {
       formData.value.sector = data.sector
     }
+    if (data.currency) {
+      formData.value.currency = data.currency.toUpperCase()
+    } else {
+      // Fallback: infer from exchange / symbol
+      formData.value.currency = inferCurrency(formData.value.symbol, formData.value.exchange)
+    }
     if (data.current_price) {
       formData.value.current_price = data.current_price
     }
@@ -86,6 +114,7 @@ const handleSubmit = async () => {
       name: formData.value.name,
       exchange: formData.value.exchange || undefined,
       sector: formData.value.sector || undefined,
+      currency: formData.value.currency || undefined,
       current_price: formData.value.current_price || undefined
     }
 
@@ -171,6 +200,7 @@ onMounted(() => {
               type="text"
               placeholder="e.g., NASDAQ, NSE"
               :disabled="loading"
+              @change="onExchangeChange"
             />
           </div>
 
@@ -186,17 +216,33 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="current_price">Current Price</label>
-          <input
-            id="current_price"
-            v-model.number="formData.current_price"
-            type="number"
-            step="0.01"
-            placeholder="e.g., 178.50"
-            :disabled="loading"
-          />
-          <small class="hint">Optional - can be updated later via "Update Prices"</small>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="currency">Currency</label>
+            <input
+              id="currency"
+              v-model="formData.currency"
+              type="text"
+              maxlength="3"
+              placeholder="e.g., INR, USD"
+              :disabled="loading"
+              style="text-transform: uppercase;"
+            />
+            <small class="hint">Auto-detected from exchange. Override if needed (INR / USD).</small>
+          </div>
+
+          <div class="form-group">
+            <label for="current_price">Current Price</label>
+            <input
+              id="current_price"
+              v-model.number="formData.current_price"
+              type="number"
+              step="0.01"
+              placeholder="e.g., 178.50"
+              :disabled="loading"
+            />
+            <small class="hint">Optional - can be updated later via "Update Prices"</small>
+          </div>
         </div>
 
         <div class="form-actions">
