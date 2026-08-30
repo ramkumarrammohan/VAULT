@@ -26,7 +26,7 @@ def _infer_currency(symbol: str, exchange: str | None) -> str | None:
 @bp.route('/', methods=['GET'])
 def get_stocks():
     """Get all stocks"""
-    stocks = Stock.query.all()
+    stocks = Stock.query.order_by(Stock.name.asc()).all()
     return jsonify([stock.to_dict() for stock in stocks])
 
 
