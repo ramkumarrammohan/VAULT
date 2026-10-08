@@ -9,6 +9,10 @@ const props = defineProps<{
   sortDirection: 'asc' | 'desc'
   expandedStocks: Set<number>
   getGainLossClass: (value: number) => string
+  nameLabel?: string
+  quantityLabel?: string
+  avgLabel?: string
+  currentLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -22,25 +26,25 @@ const emit = defineEmits<{
     <thead>
       <tr>
         <th @click="emit('sort', 'stock_symbol')" class="sortable">
-          Stock
+          {{ nameLabel ?? 'Stock' }}
           <span class="sort-indicator" v-if="sortBy === 'stock_symbol'">
             {{ sortDirection === 'asc' ? '▲' : '▼' }}
           </span>
         </th>
         <th @click="emit('sort', 'quantity')" class="sortable">
-          Quantity
+          {{ quantityLabel ?? 'Quantity' }}
           <span class="sort-indicator" v-if="sortBy === 'quantity'">
             {{ sortDirection === 'asc' ? '▲' : '▼' }}
           </span>
         </th>
         <th @click="emit('sort', 'average_price')" class="sortable">
-          Avg Price
+          {{ avgLabel ?? 'Avg Price' }}
           <span class="sort-indicator" v-if="sortBy === 'average_price'">
             {{ sortDirection === 'asc' ? '▲' : '▼' }}
           </span>
         </th>
         <th @click="emit('sort', 'current_price')" class="sortable">
-          Current Price
+          {{ currentLabel ?? 'Current Price' }}
           <span class="sort-indicator" v-if="sortBy === 'current_price'">
             {{ sortDirection === 'asc' ? '▲' : '▼' }}
           </span>
@@ -128,13 +132,13 @@ const emit = defineEmits<{
 .holdings-table td {
   padding: 1rem;
   text-align: left;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .holdings-table th {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary);
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary);
   font-size: 0.9rem;
   text-transform: uppercase;
 }
@@ -146,7 +150,7 @@ const emit = defineEmits<{
 }
 
 .holdings-table th.sortable:hover {
-  background-color: #e8e8e8;
+  background-color: var(--table-hover);
 }
 
 .sort-indicator {
@@ -157,7 +161,7 @@ const emit = defineEmits<{
 }
 
 .holdings-table tbody tr:hover {
-  background-color: #f9f9f9;
+  background-color: var(--table-hover);
 }
 
 .consolidated-row {
@@ -165,11 +169,11 @@ const emit = defineEmits<{
 }
 
 .consolidated-row:hover {
-  background-color: #f0f7f4 !important;
+  background-color: var(--table-hover) !important;
 }
 
 .consolidated-row.expanded {
-  background-color: #e8f5ee;
+  background-color: var(--table-hover);
 }
 
 .expand-chevron {
@@ -180,17 +184,17 @@ const emit = defineEmits<{
 }
 
 .sub-row {
-  background-color: #fafafa;
+  background-color: var(--bg-tertiary);
 }
 
 .sub-row:hover {
-  background-color: #f0f0f0 !important;
+  background-color: var(--table-hover) !important;
 }
 
 .sub-row td {
   font-size: 0.9rem;
-  color: #555;
-  border-bottom: 1px solid #efefef;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .sub-account-cell {
@@ -203,15 +207,15 @@ const emit = defineEmits<{
 }
 
 .holdings-table td strong {
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .holdings-table td small {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.85rem;
 }
 
 .positive { color: #42b983; }
 .negative { color: #e74c3c; }
-.neutral  { color: #666; }
+.neutral  { color: var(--text-secondary); }
 </style>

@@ -269,32 +269,63 @@ def get_portfolio_summary():
 
 @bp.route('/by-account', methods=['GET'])
 def get_portfolio_by_account():
-    """Get portfolio summary grouped by account"""
+    """Get portfolio summary grouped by account (equity + mutual funds), split by currency"""
     holdings = calculate_holdings_from_transactions()
-    
+    from mf_holdings import calculate_mutual_fund_holdings
+    mf_holdings = calculate_mutual_fund_holdings()
+
     account_dict = {}
-    
-    for holding in holdings:
+
+    def add_holding(holding):
         account_id = holding['account_id']
-        
+        currency = holding.get('currency') or 'INR'
         if account_id not in account_dict:
             account_dict[account_id] = {
                 'account_id': account_id,
                 'account_name': holding['account_name'],
                 'total_invested': 0,
                 'total_current_value': 0,
-                'holdings_count': 0
+                'holdings_count': 0,
+                'by_currency': {},
             }
-        
         account_dict[account_id]['total_invested'] += holding['invested_value']
         account_dict[account_id]['total_current_value'] += holding['current_value']
         account_dict[account_id]['holdings_count'] += 1
-    
+
+        cur = account_dict[account_id]['by_currency'].setdefault(currency, {
+            'currency': currency,
+            'total_invested': 0,
+            'total_current_value': 0,
+            'holdings_count': 0,
+        })
+        cur['total_invested'] += holding['invested_value']
+        cur['total_current_value'] += holding['current_value']
+        cur['holdings_count'] += 1
+
+    for holding in holdings:
+        add_holding(holding)
+    for holding in mf_holdings:
+        add_holding(holding)
+
     account_summaries = []
     for account_data in account_dict.values():
         total_gain_loss = account_data['total_current_value'] - account_data['total_invested']
         total_gain_loss_percentage = (total_gain_loss / account_data['total_invested'] * 100) if account_data['total_invested'] > 0 else 0
-        
+
+        by_currency = []
+        for cur in account_data['by_currency'].values():
+            cur_gain_loss = cur['total_current_value'] - cur['total_invested']
+            by_currency.append({
+                'currency': cur['currency'],
+                'total_invested': round(cur['total_invested'], 2),
+                'total_current_value': round(cur['total_current_value'], 2),
+                'total_gain_loss': round(cur_gain_loss, 2),
+                'total_gain_loss_percentage': round(
+                    (cur_gain_loss / cur['total_invested'] * 100) if cur['total_invested'] > 0 else 0, 2),
+                'holdings_count': cur['holdings_count'],
+            })
+        by_currency.sort(key=lambda x: x['currency'])
+
         account_summaries.append({
             'account_id': account_data['account_id'],
             'account_name': account_data['account_name'],
@@ -302,7 +333,8 @@ def get_portfolio_by_account():
             'total_current_value': round(account_data['total_current_value'], 2),
             'total_gain_loss': round(total_gain_loss, 2),
             'total_gain_loss_percentage': round(total_gain_loss_percentage, 2),
-            'holdings_count': account_data['holdings_count']
+            'holdings_count': account_data['holdings_count'],
+            'by_currency': by_currency,
         })
     
     return jsonify(account_summaries)

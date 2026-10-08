@@ -34,6 +34,7 @@ onMounted(() => {
           <router-link to="/">Dashboard</router-link>
           <router-link to="/accounts">Accounts</router-link>
           <router-link to="/stocks">Stocks</router-link>
+          <router-link to="/mutual-funds">Mutual Funds</router-link>
           <router-link to="/transactions">Transactions</router-link>
           <button @click="toggleTheme" class="theme-toggle" :title="isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
             {{ isDark ? '☀️' : '🌙' }}

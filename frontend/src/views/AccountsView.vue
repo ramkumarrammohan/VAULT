@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { accountApi } from '@/services/api'
-import type { Account } from '@/types'
+import { accountApi, portfolioApi } from '@/services/api'
+import type { Account, AccountSummary, CurrencyAccountSummary } from '@/types'
+import { formatCurrency } from '@/utils/currency'
 
 const router = useRouter()
 const accounts = ref<Account[]>([])
+const summaries = ref<AccountSummary[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -13,14 +15,51 @@ const loadAccounts = async () => {
   loading.value = true
   error.value = null
   try {
-    const response = await accountApi.getAll()
-    accounts.value = response.data
+    const [accountsRes, summariesRes] = await Promise.all([
+      accountApi.getAll(),
+      portfolioApi.getByAccount()
+    ])
+    accounts.value = accountsRes.data
+    summaries.value = summariesRes.data
   } catch (err: any) {
     error.value = err.response?.data?.error || 'Failed to load accounts'
     console.error('Error loading accounts:', err)
   } finally {
     loading.value = false
   }
+}
+
+const summaryFor = (accountId: number): AccountSummary | undefined => {
+  return summaries.value.find(s => s.account_id === accountId)
+}
+
+// Return the currency buckets to display. Falls back to a single bucket built
+// from the top-level totals when the backend hasn't returned by_currency yet.
+const currencyBucketsFor = (accountId: number): CurrencyAccountSummary[] => {
+  const summary = summaryFor(accountId)
+  if (!summary) return []
+  if (summary.by_currency && summary.by_currency.length > 0) {
+    return summary.by_currency
+  }
+  // Fallback: single bucket from top-level totals (INR default)
+  return [{
+    currency: 'INR',
+    total_invested: summary.total_invested,
+    total_current_value: summary.total_current_value,
+    total_gain_loss: summary.total_gain_loss,
+    total_gain_loss_percentage: summary.total_gain_loss_percentage,
+    holdings_count: summary.holdings_count,
+  }]
+}
+
+const hasSummary = (accountId: number): boolean => {
+  return currencyBucketsFor(accountId).length > 0
+}
+
+const getGainLossClass = (value: number) => {
+  if (value > 0) return 'positive'
+  if (value < 0) return 'negative'
+  return 'neutral'
 }
 
 const deleteAccount = async (id: number, name: string) => {
@@ -69,6 +108,36 @@ onMounted(() => {
         <div class="account-info">
           <h3>{{ account.name }}</h3>
           <p v-if="account.description" class="description">{{ account.description }}</p>
+        </div>
+        <div v-if="hasSummary(account.id)" class="account-summary">
+          <div v-for="bucket in currencyBucketsFor(account.id)" :key="bucket.currency" class="currency-block">
+            <div class="currency-header">
+              <span class="currency-flag">{{ bucket.currency === 'INR' ? '🇮🇳' : bucket.currency === 'USD' ? '🇺🇸' : '🌐' }}</span>
+              <span class="currency-code">{{ bucket.currency }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Invested</span>
+              <span class="summary-value">{{ formatCurrency(bucket.total_invested, bucket.currency) }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Current Value</span>
+              <span class="summary-value">{{ formatCurrency(bucket.total_current_value, bucket.currency) }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Gain/Loss</span>
+              <span class="summary-value" :class="getGainLossClass(bucket.total_gain_loss)">
+                {{ formatCurrency(bucket.total_gain_loss, bucket.currency) }}
+                ({{ bucket.total_gain_loss_percentage.toFixed(2) }}%)
+              </span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Holdings</span>
+              <span class="summary-value">{{ bucket.holdings_count }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="account-summary empty-summary">
+          <span class="summary-label">No holdings yet</span>
         </div>
         <div class="account-actions">
           <button @click="goToEdit(account.id)" class="btn-secondary">Edit</button>
@@ -155,13 +224,13 @@ h1 {
 .loading {
   text-align: center;
   padding: 2rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .empty-state {
   text-align: center;
   padding: 3rem;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 1.1rem;
 }
 
@@ -172,7 +241,7 @@ h1 {
 }
 
 .account-card {
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -183,15 +252,79 @@ h1 {
 
 .account-info h3 {
   margin: 0 0 0.5rem 0;
-  color: #2c3e50;
+  color: var(--text-primary);
   font-size: 1.3rem;
 }
 
 .account-info .description {
-  color: #666;
+  color: var(--text-secondary);
   margin: 0;
   font-size: 0.9rem;
 }
+
+.account-summary {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background-color: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.account-summary.empty-summary {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.currency-block + .currency-block {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border-color);
+}
+
+.currency-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.currency-flag {
+  font-size: 1rem;
+}
+
+.currency-code {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.summary-row + .summary-row {
+  border-top: 1px solid var(--border-light);
+}
+
+.summary-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.summary-value {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.positive { color: #42b983; }
+.negative { color: #e74c3c; }
+.neutral  { color: #666; }
 
 .account-actions {
   margin-top: 1rem;

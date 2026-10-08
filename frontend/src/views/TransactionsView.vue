@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { transactionApi, accountApi, stockApi } from '@/services/api'
-import type { Transaction, Account, Stock } from '@/types'
+import { transactionApi, accountApi, stockApi, mutualFundApi } from '@/services/api'
+import type { Transaction, Account, Stock, MutualFund, MutualFundTransaction } from '@/types'
 import { formatCurrency } from '@/utils/currency'
 
 const router = useRouter()
 const transactions = ref<Transaction[]>([])
+const mfTransactions = ref<MutualFundTransaction[]>([])
 const accounts = ref<Account[]>([])
 const stocks = ref<Stock[]>([])
+const funds = ref<MutualFund[]>([])
 const selectedAccountId = ref<number | null>(null)
 const selectedStockId = ref<number | null>(null)
+const selectedFundId = ref<number | null>(null)
+const assetFilter = ref<'ALL' | 'STOCK' | 'MUTUAL_FUND'>('ALL')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -22,6 +26,12 @@ const csvData = ref<any[]>([])
 const csvErrors = ref<string[]>([])
 const uploadLoading = ref(false)
 const editingTransactionId = ref<number | null>(null)
+const editingMfTransactionId = ref<number | null>(null)
+
+// Active tab in the Add/Edit modal: 'STOCK' or 'MUTUAL_FUND'
+const activeAssetTab = ref<'STOCK' | 'MUTUAL_FUND'>('STOCK')
+// Active tab in the Bulk Upload modal
+const activeBulkTab = ref<'STOCK' | 'MUTUAL_FUND'>('STOCK')
 
 // Convert local datetime string (from datetime-local input) to UTC ISO string before sending to backend
 const toUTCISOString = (localDateString: string): string => {
@@ -58,6 +68,19 @@ const formData = ref({
   transfer_to_account_id: null as number | null
 })
 
+const mfFormData = ref({
+  account_id: null as number | null,
+  fund_id: null as number | null,
+  transaction_type: 'BUY' as 'BUY' | 'SELL' | 'TRANSFER',
+  quantity: null as number | null,
+  nav: null as number | null,
+  amount: null as number | null,
+  transaction_date: nowLocalDateTimeInput(),
+  fees: 0,
+  notes: '',
+  transfer_to_account_id: null as number | null
+})
+
 const loadAccounts = async () => {
   try {
     const response = await accountApi.getAll()
@@ -78,6 +101,16 @@ const loadStocks = async () => {
   }
 }
 
+const loadFunds = async () => {
+  try {
+    const response = await mutualFundApi.getAll()
+    funds.value = response.data
+  } catch (err: any) {
+    error.value = 'Failed to load mutual funds'
+    console.error('Error loading mutual funds:', err)
+  }
+}
+
 const loadTransactions = async () => {
   loading.value = true
   error.value = null
@@ -86,8 +119,16 @@ const loadTransactions = async () => {
     if (selectedAccountId.value) params.account_id = selectedAccountId.value
     if (selectedStockId.value) params.stock_id = selectedStockId.value
 
-    const response = await transactionApi.getAll(params)
-    transactions.value = response.data
+    const mfParams: any = {}
+    if (selectedAccountId.value) mfParams.account_id = selectedAccountId.value
+    if (selectedFundId.value) mfParams.fund_id = selectedFundId.value
+
+    const [stockRes, mfRes] = await Promise.all([
+      transactionApi.getAll(params),
+      mutualFundApi.getTransactions(mfParams)
+    ])
+    transactions.value = stockRes.data
+    mfTransactions.value = mfRes.data
   } catch (err: any) {
     error.value = err.response?.data?.error || 'Failed to load transactions'
     console.error('Error loading transactions:', err)
@@ -96,14 +137,106 @@ const loadTransactions = async () => {
   }
 }
 
+// Unified list of stock + mutual fund transactions, each tagged with asset_class
+interface UnifiedTransaction {
+  id: number
+  asset_class: 'STOCK' | 'MUTUAL_FUND'
+  transaction_date: string
+  account_id: number
+  account_name: string
+  symbol: string
+  name: string
+  transaction_type: string
+  quantity: number
+  price: number
+  fees: number
+  total_value: number
+  notes?: string
+  transfer_to_account_name?: string | null
+  currency: string
+  // source refs for edit/delete
+  stock_id?: number
+  fund_id?: number
+}
+
+const unifiedTransactions = computed<UnifiedTransaction[]>(() => {
+  const stockRows: UnifiedTransaction[] = transactions.value.map(t => ({
+    id: t.id,
+    asset_class: 'STOCK',
+    transaction_date: t.transaction_date,
+    account_id: t.account_id,
+    account_name: t.account_name,
+    symbol: t.stock_symbol,
+    name: t.stock_symbol,
+    transaction_type: t.transaction_type,
+    quantity: t.quantity,
+    price: t.price,
+    fees: t.fees,
+    total_value: t.total_value,
+    notes: t.notes,
+    transfer_to_account_name: t.transfer_to_account_name,
+    currency: stocks.value.find(s => s.id === t.stock_id)?.currency ?? 'INR',
+    stock_id: t.stock_id
+  }))
+
+  const mfRows: UnifiedTransaction[] = mfTransactions.value.map(t => ({
+    id: t.id,
+    asset_class: 'MUTUAL_FUND',
+    transaction_date: t.transaction_date,
+    account_id: t.account_id,
+    account_name: t.account_name || '',
+    symbol: t.fund_name || '',
+    name: t.fund_name || '',
+    transaction_type: t.transaction_type,
+    quantity: t.quantity,
+    price: t.nav,
+    fees: t.fees,
+    total_value: t.amount,
+    notes: t.notes,
+    transfer_to_account_name: t.transfer_to_account_name,
+    currency: 'INR',
+    fund_id: t.fund_id
+  }))
+
+  let all = [...stockRows, ...mfRows]
+
+  if (assetFilter.value === 'STOCK') all = all.filter(r => r.asset_class === 'STOCK')
+  if (assetFilter.value === 'MUTUAL_FUND') all = all.filter(r => r.asset_class === 'MUTUAL_FUND')
+
+  // Sort by date descending (newest first)
+  all.sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime())
+  return all
+})
+
 const openEditModal = (transaction: Transaction) => {
   editingTransactionId.value = transaction.id
+  editingMfTransactionId.value = null
+  activeAssetTab.value = 'STOCK'
   formData.value = {
     account_id: transaction.account_id,
     stock_id: transaction.stock_id,
     transaction_type: transaction.transaction_type,
     quantity: transaction.quantity,
     price: transaction.price,
+    transaction_date: toLocalDateTimeInput(transaction.transaction_date),
+    fees: transaction.fees || 0,
+    notes: transaction.notes || '',
+    transfer_to_account_id: transaction.transfer_to_account_id ?? null
+  }
+  showEditModal.value = true
+}
+
+const openEditMfModal = (transaction: MutualFundTransaction) => {
+  editingMfTransactionId.value = transaction.id
+  editingTransactionId.value = null
+  activeAssetTab.value = 'MUTUAL_FUND'
+  mfFormData.value = {
+    account_id: transaction.account_id,
+    fund_id: transaction.fund_id,
+    transaction_type: transaction.transaction_type,
+    quantity: transaction.quantity,
+    nav: transaction.nav,
+    amount: transaction.amount,
     transaction_date: toLocalDateTimeInput(transaction.transaction_date),
     fees: transaction.fees || 0,
     notes: transaction.notes || '',
@@ -135,6 +268,36 @@ const updateTransaction = async () => {
   }
 }
 
+const updateMfTransaction = async () => {
+  if (!editingMfTransactionId.value) return
+
+  loading.value = true
+  error.value = null
+
+  try {
+    await mutualFundApi.updateTransaction(editingMfTransactionId.value, {
+      account_id: mfFormData.value.account_id,
+      fund_id: mfFormData.value.fund_id,
+      transaction_type: mfFormData.value.transaction_type,
+      quantity: mfFormData.value.quantity,
+      nav: mfFormData.value.transaction_type === 'TRANSFER' ? undefined : mfFormData.value.nav,
+      amount: mfFormData.value.transaction_type === 'TRANSFER' ? undefined : mfFormData.value.amount,
+      transaction_date: toUTCISOString(mfFormData.value.transaction_date),
+      fees: mfFormData.value.fees || 0,
+      notes: mfFormData.value.notes || undefined,
+      transfer_to_account_id: mfFormData.value.transfer_to_account_id || undefined
+    })
+    showEditModal.value = false
+    editingMfTransactionId.value = null
+    await loadTransactions()
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Failed to update transaction'
+    console.error('Error updating transaction:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
 const deleteTransaction = async (id: number) => {
   if (!confirm('Are you sure you want to delete this transaction? This will reverse its effect on the holding.')) {
     return
@@ -149,13 +312,40 @@ const deleteTransaction = async (id: number) => {
   }
 }
 
+const deleteMfTransaction = async (id: number) => {
+  if (!confirm('Are you sure you want to delete this mutual fund transaction? This will reverse its effect on the holding.')) {
+    return
+  }
+
+  try {
+    await mutualFundApi.deleteTransaction(id)
+    await loadTransactions()
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Failed to delete transaction'
+    console.error('Error deleting transaction:', err)
+  }
+}
+
 const openAddModal = () => {
+  activeAssetTab.value = 'STOCK'
   formData.value = {
     account_id: null,
     stock_id: null,
     transaction_type: 'BUY',
     quantity: null,
     price: null,
+    transaction_date: nowLocalDateTimeInput(),
+    fees: 0,
+    notes: '',
+    transfer_to_account_id: null
+  }
+  mfFormData.value = {
+    account_id: null,
+    fund_id: null,
+    transaction_type: 'BUY',
+    quantity: null,
+    nav: null,
+    amount: null,
     transaction_date: nowLocalDateTimeInput(),
     fees: 0,
     notes: '',
@@ -288,6 +478,111 @@ const formatCurrencyForStock = (value: number, stockId: number | null) => {
   return formatCurrency(value, stock?.currency ?? 'INR')
 }
 
+const formatCurrencyForRow = (row: UnifiedTransaction) => {
+  return formatCurrency(row.price, row.currency)
+}
+
+const formatCurrencyForRowValue = (value: number, row: UnifiedTransaction) => {
+  return formatCurrency(value, row.currency)
+}
+
+const validateMfForm = (): string | null => {
+  if (!mfFormData.value.account_id || !mfFormData.value.fund_id) {
+    return 'Please select an account and a fund'
+  }
+  if (mfFormData.value.transaction_type === 'TRANSFER') {
+    if (!mfFormData.value.transfer_to_account_id) {
+      return 'Please select a destination account for TRANSFER'
+    }
+    if (mfFormData.value.transfer_to_account_id === mfFormData.value.account_id) {
+      return 'Source and destination accounts must be different'
+    }
+    if (mfFormData.value.quantity === null) {
+      return 'Please enter the units (quantity) to transfer'
+    }
+  } else {
+    if (mfFormData.value.quantity === null && mfFormData.value.amount === null) {
+      return 'Please enter units (quantity) or the invested amount'
+    }
+  }
+  return null
+}
+
+const submitMfTransaction = async () => {
+  const validationError = validateMfForm()
+  if (validationError) {
+    error.value = validationError
+    return
+  }
+  loading.value = true
+  error.value = null
+  try {
+    await mutualFundApi.createTransaction({
+      account_id: mfFormData.value.account_id,
+      fund_id: mfFormData.value.fund_id,
+      transaction_type: mfFormData.value.transaction_type,
+      quantity: mfFormData.value.quantity,
+      nav: mfFormData.value.transaction_type === 'TRANSFER' ? undefined : mfFormData.value.nav,
+      amount: mfFormData.value.transaction_type === 'TRANSFER' ? undefined : mfFormData.value.amount,
+      transaction_date: toUTCISOString(mfFormData.value.transaction_date),
+      fees: mfFormData.value.fees || 0,
+      notes: mfFormData.value.notes || undefined,
+      transfer_to_account_id: mfFormData.value.transfer_to_account_id || undefined
+    })
+    showAddModal.value = false
+    await loadTransactions()
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Failed to create transaction'
+    console.error('Error creating transaction:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+const submitMfAndReset = async () => {
+  const validationError = validateMfForm()
+  if (validationError) {
+    error.value = validationError
+    return
+  }
+  loading.value = true
+  error.value = null
+  try {
+    await mutualFundApi.createTransaction({
+      account_id: mfFormData.value.account_id,
+      fund_id: mfFormData.value.fund_id,
+      transaction_type: mfFormData.value.transaction_type,
+      quantity: mfFormData.value.quantity,
+      nav: mfFormData.value.transaction_type === 'TRANSFER' ? undefined : mfFormData.value.nav,
+      amount: mfFormData.value.transaction_type === 'TRANSFER' ? undefined : mfFormData.value.amount,
+      transaction_date: toUTCISOString(mfFormData.value.transaction_date),
+      fees: mfFormData.value.fees || 0,
+      notes: mfFormData.value.notes || undefined,
+      transfer_to_account_id: mfFormData.value.transfer_to_account_id || undefined
+    })
+    const currentAccountId = mfFormData.value.account_id
+    const currentFundId = mfFormData.value.fund_id
+    mfFormData.value = {
+      account_id: currentAccountId,
+      fund_id: currentFundId,
+      transaction_type: mfFormData.value.transaction_type,
+      quantity: null,
+      nav: null,
+      amount: null,
+      transaction_date: nowLocalDateTimeInput(),
+      fees: 0,
+      notes: '',
+      transfer_to_account_id: null
+    }
+    await loadTransactions()
+  } catch (err: any) {
+    error.value = err.response?.data?.error || 'Failed to create transaction'
+    console.error('Error creating transaction:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
 const formatDate = (dateString: string) => {
   // Always treat the input as UTC and convert to local time for display
   if (!dateString) return ''
@@ -298,6 +593,7 @@ const formatDate = (dateString: string) => {
 }
 
 const openBulkUploadModal = () => {
+  activeBulkTab.value = 'STOCK'
   csvFile.value = null
   csvData.value = []
   csvErrors.value = []
@@ -347,7 +643,12 @@ const parseCSV = (file: File) => {
       // Parse header
       const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
 
-      // Validate required columns
+      if (activeBulkTab.value === 'MUTUAL_FUND') {
+        parseMfCsv(lines, headers)
+        return
+      }
+
+      // Validate required columns (stock)
       const requiredColumns = ['account', 'stock_symbol', 'transaction_type', 'quantity', 'price', 'transaction_date']
       const missingColumns = requiredColumns.filter(col => !headers.includes(col))
 
@@ -436,6 +737,78 @@ const parseCSV = (file: File) => {
   reader.readAsText(file)
 }
 
+const parseMfCsv = (lines: string[], headers: string[]) => {
+  const requiredColumns = ['account', 'fund', 'transaction_type', 'transaction_date']
+  const missingColumns = requiredColumns.filter(col => !headers.includes(col))
+  if (missingColumns.length > 0) {
+    csvErrors.value = [`Missing required columns: ${missingColumns.join(', ')}`]
+    return
+  }
+
+  const parsed: any[] = []
+  const errors: string[] = []
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim())
+    const row: any = {}
+    headers.forEach((header, index) => { row[header] = values[index] || '' })
+
+    const account = accounts.value.find(a => a.name.toLowerCase() === row.account.toLowerCase())
+    if (!account) {
+      errors.push(`Row ${i}: Account "${row.account}" not found`)
+      continue
+    }
+
+    const fund = funds.value.find(f =>
+      (f.scheme_code && f.scheme_code.toUpperCase() === row.fund.toUpperCase()) ||
+      f.name.toLowerCase() === row.fund.toLowerCase()
+    )
+    if (!fund) {
+      errors.push(`Row ${i}: Fund "${row.fund}" not found`)
+      continue
+    }
+
+    const transType = row.transaction_type.toUpperCase()
+    if (!['BUY', 'SELL', 'TRANSFER'].includes(transType)) {
+      errors.push(`Row ${i}: Invalid transaction type "${row.transaction_type}" (use BUY, SELL, or TRANSFER)`)
+      continue
+    }
+
+    let transferToAccountId: number | undefined
+    if (transType === 'TRANSFER') {
+      const destName = row.transfer_to_account || ''
+      const destAccount = accounts.value.find(a => a.name.toLowerCase() === destName.toLowerCase())
+      if (!destAccount) {
+        errors.push(`Row ${i}: Destination account "${destName}" not found for TRANSFER`)
+        continue
+      }
+      if (destAccount.id === account.id) {
+        errors.push(`Row ${i}: Source and destination accounts must be different for TRANSFER`)
+        continue
+      }
+      transferToAccountId = destAccount.id
+    }
+
+    parsed.push({
+      account_id: account.id,
+      account_name: account.name,
+      fund_id: fund.id,
+      fund_name: fund.name,
+      transaction_type: transType,
+      quantity: row.quantity ? parseFloat(row.quantity) : undefined,
+      nav: row.nav ? parseFloat(row.nav) : undefined,
+      amount: row.amount ? parseFloat(row.amount) : undefined,
+      fees: row.fees ? parseFloat(row.fees) : 0,
+      transaction_date: row.transaction_date,
+      notes: row.notes || '',
+      transfer_to_account_id: transferToAccountId
+    })
+  }
+
+  csvData.value = parsed
+  csvErrors.value = errors
+}
+
 const submitBulkTransactions = async () => {
   if (csvData.value.length === 0) {
     error.value = 'No valid transactions to upload'
@@ -447,9 +820,9 @@ const submitBulkTransactions = async () => {
 
   try {
     console.log('Sending bulk transactions:', csvData.value)
-    const response = await transactionApi.createBulk({
-      transactions: csvData.value
-    })
+    const response = activeBulkTab.value === 'MUTUAL_FUND'
+      ? await mutualFundApi.createBulkTransactions({ transactions: csvData.value })
+      : await transactionApi.createBulk({ transactions: csvData.value })
 
     showBulkUploadModal.value = false
     await loadTransactions()
@@ -469,6 +842,23 @@ const submitBulkTransactions = async () => {
 }
 
 const downloadTemplate = () => {
+  if (activeBulkTab.value === 'MUTUAL_FUND') {
+    const template = [
+      'account,fund,transaction_type,quantity,nav,amount,transaction_date,fees,notes,transfer_to_account',
+      'My Account,HDFC Mid-Cap Opportunities Fund - Direct - Growth,BUY,50,245.6789,,2024-01-15,0,SIP purchase,',
+      'My Account,HDFC Mid-Cap Opportunities Fund - Direct - Growth,SELL,10,,,2024-06-01,0,Redemption,',
+      'Account 1,HDFC Mid-Cap Opportunities Fund - Direct - Growth,TRANSFER,20,,,2024-07-01,0,Transfer,Account 2'
+    ].join('\n')
+    const blob = new Blob([template], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'mutual_funds_template.csv'
+    a.click()
+    window.URL.revokeObjectURL(url)
+    return
+  }
+
   const template = [
     'account,stock_symbol,transaction_type,quantity,price,transaction_date,fees,notes,transfer_to_account',
     'My Account,AAPL,BUY,10,150.50,2024-01-15,5.00,Sample buy,',
@@ -487,6 +877,7 @@ const downloadTemplate = () => {
 onMounted(async () => {
   await loadAccounts()
   await loadStocks()
+  await loadFunds()
   await loadTransactions()
 })
 </script>
@@ -502,6 +893,14 @@ onMounted(async () => {
     </div>
 
     <div class="filter-section">
+      <div class="filter-group">
+        <label for="asset-filter">Asset Type:</label>
+        <select id="asset-filter" v-model="assetFilter">
+          <option value="ALL">All (Stocks + Funds)</option>
+          <option value="STOCK">Stocks</option>
+          <option value="MUTUAL_FUND">Mutual Funds</option>
+        </select>
+      </div>
       <div class="filter-group">
         <label for="account-filter">Filter by Account:</label>
         <select id="account-filter" v-model.number="selectedAccountId" @change="loadTransactions">
@@ -520,12 +919,21 @@ onMounted(async () => {
           </option>
         </select>
       </div>
+      <div class="filter-group">
+        <label for="fund-filter">Filter by Fund:</label>
+        <select id="fund-filter" v-model.number="selectedFundId" @change="loadTransactions">
+          <option :value="null">All Funds</option>
+          <option v-for="fund in funds" :key="fund.id" :value="fund.id">
+            {{ fund.name }}
+          </option>
+        </select>
+      </div>
     </div>
 
     <div v-if="error" class="error-message">{{ error }}</div>
     <div v-if="loading" class="loading">Loading...</div>
 
-    <div v-else-if="transactions.length === 0" class="empty-state">
+    <div v-else-if="unifiedTransactions.length === 0" class="empty-state">
       <p>No transactions yet. Add your first transaction to track your trades!</p>
     </div>
 
@@ -535,10 +943,11 @@ onMounted(async () => {
           <tr>
             <th>Date</th>
             <th>Account</th>
-            <th>Stock</th>
+            <th>Asset</th>
+            <th>Symbol / Scheme</th>
             <th>Type</th>
             <th>Quantity</th>
-            <th>Price</th>
+            <th>Price / NAV</th>
             <th>Fees</th>
             <th>Total Value</th>
             <th>Notes</th>
@@ -546,10 +955,15 @@ onMounted(async () => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="transaction in transactions" :key="transaction.id">
+          <tr v-for="transaction in unifiedTransactions" :key="transaction.asset_class + '-' + transaction.id">
             <td>{{ formatDate(transaction.transaction_date) }}</td>
             <td>{{ transaction.account_name }}</td>
-            <td><strong>{{ transaction.stock_symbol }}</strong></td>
+            <td>
+              <span :class="['asset-badge', transaction.asset_class === 'STOCK' ? 'stock' : 'fund']">
+                {{ transaction.asset_class === 'STOCK' ? 'Stock' : 'Fund' }}
+              </span>
+            </td>
+            <td><strong>{{ transaction.symbol }}</strong></td>
             <td>
               <span :class="['type-badge',
                 transaction.transaction_type === 'BUY' ? 'buy' :
@@ -565,13 +979,15 @@ onMounted(async () => {
               </span>
             </td>
             <td>{{ transaction.quantity }}</td>
-            <td>{{ formatCurrencyForStock(transaction.price, transaction.stock_id) }}</td>
-            <td>{{ formatCurrencyForStock(transaction.fees, transaction.stock_id) }}</td>
-            <td>{{ formatCurrencyForStock(transaction.total_value, transaction.stock_id) }}</td>
+            <td>{{ formatCurrencyForRow(transaction) }}</td>
+            <td>{{ formatCurrencyForRowValue(transaction.fees, transaction) }}</td>
+            <td>{{ formatCurrencyForRowValue(transaction.total_value, transaction) }}</td>
             <td>{{ transaction.notes || '-' }}</td>
             <td class="actions">
-              <button @click="openEditModal(transaction)" class="btn-edit-small">Edit</button>
-              <button @click="deleteTransaction(transaction.id)" class="btn-danger-small">Delete</button>
+              <button v-if="transaction.asset_class === 'STOCK'" @click="openEditModal(transactions.find(t => t.id === transaction.id)!)" class="btn-edit-small">Edit</button>
+              <button v-else @click="openEditMfModal(mfTransactions.find(t => t.id === transaction.id)!)" class="btn-edit-small">Edit</button>
+              <button v-if="transaction.asset_class === 'STOCK'" @click="deleteTransaction(transaction.id)" class="btn-danger-small">Delete</button>
+              <button v-else @click="deleteMfTransaction(transaction.id)" class="btn-danger-small">Delete</button>
             </td>
           </tr>
         </tbody>
@@ -583,7 +999,22 @@ onMounted(async () => {
       <div class="modal-content">
         <h2>Add Transaction</h2>
 
-        <form @submit.prevent="submitTransaction">
+        <!-- Asset type tabs -->
+        <div class="asset-tabs">
+          <button
+            type="button"
+            :class="['asset-tab', activeAssetTab === 'STOCK' ? 'active' : '']"
+            @click="activeAssetTab = 'STOCK'"
+          >Stock</button>
+          <button
+            type="button"
+            :class="['asset-tab', activeAssetTab === 'MUTUAL_FUND' ? 'active' : '']"
+            @click="activeAssetTab = 'MUTUAL_FUND'"
+          >Mutual Fund</button>
+        </div>
+
+        <!-- Stock form -->
+        <form v-if="activeAssetTab === 'STOCK'" @submit.prevent="submitTransaction">
           <div class="form-group">
             <label for="account">Account *</label>
             <select
@@ -704,6 +1135,92 @@ onMounted(async () => {
             </button>
           </div>
         </form>
+
+        <!-- Mutual fund form -->
+        <form v-else @submit.prevent="submitMfTransaction">
+          <div class="form-group">
+            <label for="mf-account">Account *</label>
+            <select id="mf-account" v-model.number="mfFormData.account_id" required>
+              <option :value="null">Select an account</option>
+              <option v-for="account in accounts" :key="account.id" :value="account.id">
+                {{ account.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="mf-fund">Fund *</label>
+            <select id="mf-fund" v-model.number="mfFormData.fund_id" required>
+              <option :value="null">Select a fund</option>
+              <option v-for="fund in funds" :key="fund.id" :value="fund.id">
+                {{ fund.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="mf-transaction_type">Transaction Type *</label>
+            <select id="mf-transaction_type" v-model="mfFormData.transaction_type" required>
+              <option value="BUY">BUY (Lumpsum / SIP)</option>
+              <option value="SELL">SELL (Redemption)</option>
+              <option value="TRANSFER">TRANSFER (Between Accounts)</option>
+            </select>
+          </div>
+
+          <div v-if="mfFormData.transaction_type === 'TRANSFER'" class="form-group">
+            <label for="mf-transfer_to_account">Transfer To Account *</label>
+            <select id="mf-transfer_to_account" v-model.number="mfFormData.transfer_to_account_id" required>
+              <option :value="null" disabled>Select destination account</option>
+              <option v-for="account in accounts.filter(a => a.id !== mfFormData.account_id)" :key="account.id" :value="account.id">
+                {{ account.name }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="mfFormData.transaction_type !== 'TRANSFER'" class="form-row">
+            <div class="form-group">
+              <label for="mf-quantity">Units</label>
+              <input id="mf-quantity" v-model.number="mfFormData.quantity" type="number" step="0.0001" placeholder="e.g., 50.1234" />
+              <small class="hint">Either units or amount is required.</small>
+            </div>
+            <div class="form-group">
+              <label for="mf-nav">NAV</label>
+              <input id="mf-nav" v-model.number="mfFormData.nav" type="number" step="0.0001" placeholder="e.g., 245.6789" />
+            </div>
+          </div>
+
+          <div v-if="mfFormData.transaction_type !== 'TRANSFER'" class="form-group">
+            <label for="mf-amount">Invested Amount</label>
+            <input id="mf-amount" v-model.number="mfFormData.amount" type="number" step="0.01" placeholder="e.g., 5000" />
+            <small class="hint">If only amount is given, units are computed from the NAV on the transaction date.</small>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="mf-transaction_date">Transaction Date *</label>
+              <input id="mf-transaction_date" v-model="mfFormData.transaction_date" type="datetime-local" required />
+            </div>
+            <div class="form-group">
+              <label for="mf-fees">Fees</label>
+              <input id="mf-fees" v-model.number="mfFormData.fees" type="number" step="0.01" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="mf-notes">Notes</label>
+            <textarea id="mf-notes" v-model="mfFormData.notes" rows="2"></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" @click="showAddModal = false" class="btn-secondary">Cancel</button>
+            <button type="button" @click="submitMfAndReset" class="btn-success" :disabled="loading">
+              {{ loading ? 'Saving...' : 'Add & New' }}
+            </button>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              {{ loading ? 'Saving...' : 'Add Transaction' }}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -714,7 +1231,22 @@ onMounted(async () => {
 
         <div v-if="error" class="error-message">{{ error }}</div>
 
-        <form @submit.prevent="updateTransaction">
+        <!-- Asset type tabs -->
+        <div class="asset-tabs">
+          <button
+            type="button"
+            :class="['asset-tab', activeAssetTab === 'STOCK' ? 'active' : '']"
+            @click="activeAssetTab = 'STOCK'"
+          >Stock</button>
+          <button
+            type="button"
+            :class="['asset-tab', activeAssetTab === 'MUTUAL_FUND' ? 'active' : '']"
+            @click="activeAssetTab = 'MUTUAL_FUND'"
+          >Mutual Fund</button>
+        </div>
+
+        <!-- Stock edit form -->
+        <form v-if="activeAssetTab === 'STOCK'" @submit.prevent="updateTransaction">
           <div class="form-row">
             <div class="form-group">
               <label for="edit_account_id">Account *</label>
@@ -828,6 +1360,85 @@ onMounted(async () => {
             </button>
           </div>
         </form>
+
+        <!-- Mutual fund edit form -->
+        <form v-else @submit.prevent="updateMfTransaction">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_mf_account_id">Account *</label>
+              <select id="edit_mf_account_id" v-model.number="mfFormData.account_id" required>
+                <option :value="null" disabled>Select account</option>
+                <option v-for="account in accounts" :key="account.id" :value="account.id">
+                  {{ account.name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit_mf_fund_id">Fund *</label>
+              <select id="edit_mf_fund_id" v-model.number="mfFormData.fund_id" required>
+                <option :value="null" disabled>Select fund</option>
+                <option v-for="fund in funds" :key="fund.id" :value="fund.id">
+                  {{ fund.name }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_mf_transaction_type">Type *</label>
+              <select id="edit_mf_transaction_type" v-model="mfFormData.transaction_type" required>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="TRANSFER">TRANSFER</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit_mf_quantity">Units *</label>
+              <input id="edit_mf_quantity" v-model.number="mfFormData.quantity" type="number" step="0.0001" required />
+            </div>
+          </div>
+
+          <div v-if="mfFormData.transaction_type !== 'TRANSFER'" class="form-row">
+            <div class="form-group">
+              <label for="edit_mf_nav">NAV *</label>
+              <input id="edit_mf_nav" v-model.number="mfFormData.nav" type="number" step="0.0001" required />
+            </div>
+            <div class="form-group">
+              <label for="edit_mf_transaction_date">Transaction Date *</label>
+              <input id="edit_mf_transaction_date" v-model="mfFormData.transaction_date" type="datetime-local" required />
+            </div>
+          </div>
+
+          <div v-if="mfFormData.transaction_type === 'TRANSFER'" class="form-group">
+            <label for="edit_mf_transfer_to_account">Transfer To Account *</label>
+            <select id="edit_mf_transfer_to_account" v-model.number="mfFormData.transfer_to_account_id" required>
+              <option :value="null" disabled>Select destination account</option>
+              <option v-for="account in accounts.filter(a => a.id !== mfFormData.account_id)" :key="account.id" :value="account.id">
+                {{ account.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit_mf_fees">Fees</label>
+              <input id="edit_mf_fees" v-model.number="mfFormData.fees" type="number" step="0.01" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit_mf_notes">Notes</label>
+            <textarea id="edit_mf_notes" v-model="mfFormData.notes" rows="2"></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" @click="showEditModal = false" class="btn-secondary">Cancel</button>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              {{ loading ? 'Updating...' : 'Update Transaction' }}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -836,9 +1447,29 @@ onMounted(async () => {
       <div class="modal-content large-modal">
         <h2>Bulk Upload Transactions from CSV</h2>
 
-        <div class="upload-info">
-          <p>Upload a CSV file with your transactions. The file should have the following columns:</p>
+        <!-- Asset type tabs -->
+        <div class="asset-tabs">
+          <button
+            type="button"
+            :class="['asset-tab', activeBulkTab === 'STOCK' ? 'active' : '']"
+            @click="activeBulkTab = 'STOCK'; csvData = []; csvErrors = []; csvFile = null"
+          >Stock</button>
+          <button
+            type="button"
+            :class="['asset-tab', activeBulkTab === 'MUTUAL_FUND' ? 'active' : '']"
+            @click="activeBulkTab = 'MUTUAL_FUND'; csvData = []; csvErrors = []; csvFile = null"
+          >Mutual Fund</button>
+        </div>
+
+        <div v-if="activeBulkTab === 'STOCK'" class="upload-info">
+          <p>Upload a CSV file with your stock transactions. The file should have the following columns:</p>
           <p><strong>account, stock_symbol, transaction_type, quantity, price, transaction_date, fees (optional), notes (optional)</strong></p>
+          <button @click="downloadTemplate" class="btn-link">Download CSV Template</button>
+        </div>
+        <div v-else class="upload-info">
+          <p>Upload a CSV file with your mutual fund transactions. The file should have the following columns:</p>
+          <p><strong>account, fund, transaction_type, quantity, nav, amount, transaction_date, fees (optional), notes (optional), transfer_to_account (optional)</strong></p>
+          <p><small>Fund can be the scheme name or AMFI scheme code. Provide units, or amount (units auto-computed from NAV on date).</small></p>
           <button @click="downloadTemplate" class="btn-link">Download CSV Template</button>
         </div>
 
@@ -864,16 +1495,15 @@ onMounted(async () => {
 
         <div v-if="csvData.length > 0" class="preview-section">
           <h3>Preview ({{ csvData.length }} transactions)</h3>
-          <p style="color: red; font-size: 0.9rem;">Debug: Array has {{ csvData.length }} items. If you see more rows below, it's a rendering issue.</p>
           <div class="preview-table-container">
             <table class="preview-table">
               <thead>
                 <tr>
                   <th>Account</th>
-                  <th>Stock</th>
+                  <th>{{ activeBulkTab === 'STOCK' ? 'Stock' : 'Fund' }}</th>
                   <th>Type</th>
                   <th>Quantity</th>
-                  <th>Price</th>
+                  <th>{{ activeBulkTab === 'STOCK' ? 'Price' : 'NAV' }}</th>
                   <th>Fees</th>
                   <th>Date</th>
                   <th>Notes</th>
@@ -882,7 +1512,7 @@ onMounted(async () => {
               <tbody>
                 <tr v-for="(item, idx) in csvData" :key="idx">
                   <td>{{ idx + 1 }}. {{ item.account_name }}</td>
-                  <td>{{ item.stock_symbol }}</td>
+                  <td>{{ activeBulkTab === 'STOCK' ? item.stock_symbol : item.fund_name }}</td>
                   <td>
                     <span :class="['type-badge', item.transaction_type === 'BUY' ? 'buy' : item.transaction_type === 'SELL' ? 'sell' : 'transfer']">
                       {{ item.transaction_type }}
@@ -891,9 +1521,9 @@ onMounted(async () => {
                       → {{ accounts.find(a => a.id === item.transfer_to_account_id)?.name }}
                     </span>
                   </td>
-                  <td>{{ item.quantity }}</td>
-                  <td>{{ formatCurrencyForStock(item.price, item.stock_id) }}</td>
-                  <td>{{ formatCurrencyForStock(item.fees, item.stock_id) }}</td>
+                  <td>{{ item.quantity ?? '-' }}</td>
+                  <td>{{ activeBulkTab === 'STOCK' ? formatCurrencyForStock(item.price, item.stock_id) : (item.nav ? formatCurrency(item.nav, 'INR') : '-') }}</td>
+                  <td>{{ activeBulkTab === 'STOCK' ? formatCurrencyForStock(item.fees, item.stock_id) : formatCurrency(item.fees, 'INR') }}</td>
                   <td>{{ item.transaction_date }}</td>
                   <td>{{ item.notes || '-' }}</td>
                 </tr>
@@ -942,15 +1572,15 @@ h1 {
   padding: 1rem;
   border-radius: 8px;
   margin-bottom: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 2rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
 }
 
 .filter-group {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.4rem;
 }
 
 .filter-section label {
@@ -964,7 +1594,8 @@ h1 {
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 1rem;
-  min-width: 200px;
+  width: 100%;
+  min-width: 0;
 }
 
 .btn-primary {
@@ -1122,6 +1753,57 @@ h1 {
 .type-badge.transfer {
   background-color: #e8d5f5;
   color: #5a1e8a;
+}
+
+.asset-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.asset-badge.stock {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.asset-badge.fund {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.asset-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 0.5rem;
+}
+
+.asset-tab {
+  background: none;
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #666;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -0.5rem;
+  transition: all 0.2s;
+}
+
+.asset-tab:hover {
+  color: #2c3e50;
+  background-color: #f5f5f5;
+}
+
+.asset-tab.active {
+  color: #42b983;
+  border-bottom-color: #42b983;
+  background-color: #f0f7f4;
 }
 
 .demerger-info {

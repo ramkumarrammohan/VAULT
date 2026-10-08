@@ -58,4 +58,26 @@ export const transactionApi = {
   delete: (id: number) => apiClient.delete(`/transactions/${id}`)
 }
 
+// Mutual Funds API
+export const mutualFundApi = {
+  getAll: () => apiClient.get('/mutual-funds/'),
+  getOverview: () => apiClient.get('/mutual-funds/overview'),
+  getById: (id: number) => apiClient.get(`/mutual-funds/${id}`),
+  create: (data: any) => apiClient.post('/mutual-funds/', data),
+  update: (id: number, data: any) => apiClient.put(`/mutual-funds/${id}`, data),
+  delete: (id: number) => apiClient.delete(`/mutual-funds/${id}`),
+  searchSchemes: (query: string) => apiClient.get('/mutual-funds/search', { params: { q: query } }),
+  getScheme: (schemeCode: string) => apiClient.get(`/mutual-funds/scheme/${schemeCode}`),
+  getHoldings: () => apiClient.get('/mutual-funds/holdings'),
+  getSummary: () => apiClient.get('/mutual-funds/summary'),
+  getTransactions: (params?: { account_id?: number; fund_id?: number }) =>
+    apiClient.get('/mutual-funds/transactions', { params }),
+  createTransaction: (data: any) => apiClient.post('/mutual-funds/transactions', data),
+  createBulkTransactions: (data: any) => apiClient.post('/mutual-funds/transactions/bulk', data),
+  updateTransaction: (id: number, data: any) => apiClient.put(`/mutual-funds/transactions/${id}`, data),
+  deleteTransaction: (id: number) => apiClient.delete(`/mutual-funds/transactions/${id}`),
+  updateNav: (schemeCode: string) => apiClient.post(`/mutual-funds/navs/update/${schemeCode}`),
+  updateAllNavs: () => apiClient.post('/mutual-funds/navs/update')
+}
+
 export default apiClient

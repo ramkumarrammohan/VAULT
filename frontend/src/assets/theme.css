@@ -6,7 +6,8 @@
 .stocks-page,
 .transactions-page,
 .stock-form,
-.account-form {
+.account-form,
+.mutual-funds-page {
   background: var(--bg-primary) !important;
 }
 
@@ -17,7 +18,8 @@
 .account-card,
 .stocks-table-container,
 .transactions-table-container,
-.holdings-section {
+.holdings-section,
+.funds-table-container {
   background: var(--bg-secondary) !important;
   color: var(--text-primary) !important;
 }
@@ -49,7 +51,8 @@ table {
 
 thead,
 .stocks-table th,
-.transactions-table th {
+.transactions-table th,
+.funds-table th {
   background-color: var(--bg-tertiary) !important;
 }
 
@@ -62,7 +65,8 @@ td, th {
 }
 
 /* Table cell strong text (stock names) */
-.stocks-table td strong {
+.stocks-table td strong,
+.funds-table td strong {
   color: var(--text-primary) !important;
 }
 
@@ -85,6 +89,17 @@ td, th {
 .type-badge.demerger {
   background-color: #d1ecf1 !important;
   color: #0c5460 !important;
+}
+
+/* Asset type badges (Stock / Fund) - keep light theme colors for visibility in dark mode */
+.asset-badge.stock {
+  background-color: #d1ecf1 !important;
+  color: #0c5460 !important;
+}
+
+.asset-badge.fund {
+  background-color: #fff3cd !important;
+  color: #856404 !important;
 }
 
 /* Modal styles */

@@ -6,6 +6,8 @@ import AccountFormView from '@/views/AccountFormView.vue'
 import StocksView from '@/views/StocksView.vue'
 import StockFormView from '@/views/StockFormView.vue'
 import TransactionsView from '@/views/TransactionsView.vue'
+import MutualFundsView from '@/views/MutualFundsView.vue'
+import MutualFundFormView from '@/views/MutualFundFormView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -54,6 +56,21 @@ const router = createRouter({
       path: '/corporate-events',
       name: 'corporate-events',
       component: CorporateEventsView
+    },
+    {
+      path: '/mutual-funds',
+      name: 'mutual-funds',
+      component: MutualFundsView
+    },
+    {
+      path: '/mutual-funds/add',
+      name: 'mutual-fund-add',
+      component: MutualFundFormView
+    },
+    {
+      path: '/mutual-funds/edit/:id',
+      name: 'mutual-fund-edit',
+      component: MutualFundFormView
     }
   ],
 })

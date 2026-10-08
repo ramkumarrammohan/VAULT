@@ -606,6 +606,139 @@ DELETE /api/transactions/{id}
 
 ---
 
+## Mutual Funds API
+
+Mutual fund schemes and their buy/sell/transfer transactions. All values are in INR. Transaction types follow the stock convention: `BUY` (lumpsum/SIP), `SELL` (redemption), `TRANSFER` (between accounts, preserving cost basis).
+
+### Get All Mutual Funds
+```http
+GET /api/mutual-funds/
+```
+Returns all funds ordered by name.
+
+### Get Funds Overview (with portfolio aggregates)
+```http
+GET /api/mutual-funds/overview
+```
+Returns each fund enriched with computed `total_units`, `total_invested`, `total_current_value`, `total_gain_loss`, `total_gain_loss_percentage` across all accounts.
+
+### Get Mutual Fund by ID
+```http
+GET /api/mutual-funds/{id}
+```
+
+### Create Mutual Fund
+```http
+POST /api/mutual-funds/
+```
+**Body:**
+```json
+{
+  "scheme_code": "119598",
+  "name": "HDFC Mid-Cap Opportunities Fund - Direct - Growth",
+  "amc": "HDFC Mutual Fund",
+  "category": "Equity: Mid Cap",
+  "plan": "DIRECT",
+  "option": "GROWTH",
+  "isin": "INE00A0D0HN2",
+  "folio": "12345678",
+  "nav": 245.6789,
+  "nav_date": "2026-09-07"
+}
+```
+`scheme_code` is optional but enables automatic NAV refresh. `name` is required.
+
+### Update Mutual Fund
+```http
+PUT /api/mutual-funds/{id}
+```
+
+### Delete Mutual Fund
+```http
+DELETE /api/mutual-funds/{id}
+```
+Deletes the fund and all its transactions.
+
+### Search AMFI Schemes
+```http
+GET /api/mutual-funds/search?q=HDFC%20Mid%20Cap
+```
+Returns matching schemes from the AMFI/mfapi.in list for the add-fund form.
+
+### Fetch Scheme Info (metadata + latest NAV)
+```http
+GET /api/mutual-funds/scheme/{scheme_code}
+```
+Returns scheme metadata (`amc`, `category`, `plan`, `option`) and latest NAV/date for auto-fill.
+
+### Get Mutual Fund Holdings
+```http
+GET /api/mutual-funds/holdings
+```
+Returns current holdings computed from transactions via FIFO lot tracking. Each holding includes `fund_id`, `fund_name`, `scheme_code`, `amc`, `category`, `asset_class: "MUTUAL_FUND"`, `quantity` (units), `average_price` (weighted avg NAV), `current_price` (latest NAV), `invested_value`, `current_value`, `gain_loss`, `gain_loss_percentage`.
+
+### Get Mutual Fund Summary
+```http
+GET /api/mutual-funds/summary
+```
+Returns INR totals plus `by_category` and `by_amc` breakdowns.
+
+### Get Mutual Fund Transactions
+```http
+GET /api/mutual-funds/transactions?account_id=1&fund_id=2
+```
+Optional filters: `account_id`, `fund_id`.
+
+### Create Mutual Fund Transaction
+```http
+POST /api/mutual-funds/transactions
+```
+**Body:**
+```json
+{
+  "account_id": 1,
+  "fund_id": 2,
+  "transaction_type": "BUY",
+  "quantity": 50,
+  "nav": 245.6789,
+  "transaction_date": "2024-01-15",
+  "fees": 0,
+  "notes": "SIP purchase",
+  "transfer_to_account_id": null
+}
+```
+For `BUY`/`SELL`, provide `quantity` + `nav`, or `amount` (units auto-computed from NAV on the transaction date when the fund has a `scheme_code`). `TRANSFER` requires `transfer_to_account_id`.
+
+### Bulk Create Mutual Fund Transactions
+```http
+POST /api/mutual-funds/transactions/bulk
+```
+**Body:** `{ "transactions": [ ... ] }`. Each row accepts ids or names (`account_name`, `fund_name`/`scheme_code`). Returns `success_count`, `error_count`, `errors`, `created`.
+
+### Update Mutual Fund Transaction
+```http
+PUT /api/mutual-funds/transactions/{id}
+```
+
+### Delete Mutual Fund Transaction
+```http
+DELETE /api/mutual-funds/transactions/{id}
+```
+
+### Update NAV for One Fund
+```http
+POST /api/mutual-funds/navs/update/{scheme_code}
+```
+Fetches the latest NAV from mfapi.in and updates the fund. Subject to a 60-second cooldown (429 on rapid re-hits).
+
+### Update NAV for All Funds
+```http
+POST /api/mutual-funds/navs/update
+```
+Updates NAV for all funds with an AMFI `scheme_code`, sequentially with a 1-second delay. Returns `updated`, `failed`, `updated_count`, `failed_count`.
+
+---
+
 ## Testing with curl
 
 ### Create a complete holding workflow

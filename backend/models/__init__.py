@@ -4,3 +4,5 @@ from .holding import Holding
 from .stock import Stock
 from .transaction import Transaction
 from .corporate_event import CorporateEvent
+from .mutual_fund import MutualFund
+from .mutual_fund_transaction import MutualFundTransaction

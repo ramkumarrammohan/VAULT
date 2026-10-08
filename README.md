@@ -1,6 +1,6 @@
 # Portfolio Tracker
 
-A personal portfolio tracker application for managing stock holdings across multiple brokers.
+A personal portfolio tracker application for managing stock holdings across multiple brokers, plus Indian mutual fund portfolios (schemes, SIP/redemption tracking, NAV refresh).
 
 ## Project Structure
 
@@ -13,6 +13,12 @@ A personal portfolio tracker application for managing stock holdings across mult
   /venv        - Python virtual environment
 /frontend      - Vue.js application
 ```
+
+## Features
+
+- **Equity portfolios** — Indian (NSE/BSE) & US (NYSE/NASDAQ) stocks with live price refresh (Yahoo Finance), FIFO cost-basis holdings, corporate actions (split/demerger/merger), and a currency-split dashboard.
+- **Mutual fund portfolios** — Indian mutual fund schemes with historical buy/SIP/redemption tracking, FIFO unit holdings, and NAV refresh via the AMFI/mfapi.in provider. Mutual fund holdings roll up into the combined INR portfolio on the dashboard.
+- **Bulk CSV import** for both stock and mutual fund transactions.
 
 ## Setup Instructions
 

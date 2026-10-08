@@ -23,10 +23,10 @@ def create_app(config_name=None):
          allow_headers=['Content-Type', 'Authorization'])
     
     # Import models (needed for migrations)
-    from models import account, stock, holding, transaction, corporate_event
+    from models import account, stock, holding, transaction, corporate_event, mutual_fund, mutual_fund_transaction
     
     # Register blueprints
-    from api import accounts, stocks, portfolio, prices, transactions, corporate_events
+    from api import accounts, stocks, portfolio, prices, transactions, corporate_events, mutual_funds
 
     app.register_blueprint(accounts.bp, url_prefix=f"{app.config['API_PREFIX']}/accounts")
     app.register_blueprint(stocks.bp, url_prefix=f"{app.config['API_PREFIX']}/stocks")
@@ -34,6 +34,7 @@ def create_app(config_name=None):
     app.register_blueprint(prices.bp, url_prefix=f"{app.config['API_PREFIX']}/prices")
     app.register_blueprint(transactions.bp, url_prefix=f"{app.config['API_PREFIX']}/transactions")
     app.register_blueprint(corporate_events.bp, url_prefix=f"{app.config['API_PREFIX']}/corporate-events")
+    app.register_blueprint(mutual_funds.bp, url_prefix=f"{app.config['API_PREFIX']}/mutual-funds")
     
     # Health check endpoint
     @app.route('/health')

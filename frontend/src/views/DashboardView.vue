@@ -1,8 +1,8 @@
 <script setup lang="ts">
 
 import { ref, computed, onMounted } from 'vue'
-import { portfolioApi, priceApi, accountApi, stockApi } from '@/services/api'
-import type { PortfolioSummary, Holding, Account, Stock, ConsolidatedHolding } from '@/types'
+import { portfolioApi, priceApi, accountApi, stockApi, mutualFundApi } from '@/services/api'
+import type { PortfolioSummary, Holding, Account, Stock, ConsolidatedHolding, MutualFundHolding, MutualFundSummary } from '@/types'
 import { formatCurrency } from '@/utils/currency'
 import HoldingsTable from '@/components/HoldingsTable.vue'
 
@@ -11,6 +11,8 @@ const summary = ref<PortfolioSummary | null>(null)
 const holdings = ref<Holding[]>([])
 const accounts = ref<Account[]>([])
 const stocks = ref<Stock[]>([])
+const mfHoldings = ref<MutualFundHolding[]>([])
+const mfSummary = ref<MutualFundSummary | null>(null)
 const selectedAccountId = ref<number | null>(null)
 const selectedStockId = ref<number | null>(null)
 const sortBy = ref<string>('stock_symbol')
@@ -40,12 +42,16 @@ const loadStocks = async () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const [summaryRes, holdingsRes] = await Promise.all([
+    const [summaryRes, holdingsRes, mfHoldingsRes, mfSummaryRes] = await Promise.all([
       portfolioApi.getSummary(),
-      portfolioApi.getHoldings()
+      portfolioApi.getHoldings(),
+      mutualFundApi.getHoldings(),
+      mutualFundApi.getSummary()
     ])
     summary.value = summaryRes.data
     holdings.value = holdingsRes.data
+    mfHoldings.value = mfHoldingsRes.data
+    mfSummary.value = mfSummaryRes.data
   } catch (error) {
     console.error('Error loading data:', error)
   } finally {
@@ -60,6 +66,18 @@ const updateAllPrices = async () => {
     await loadData()
   } catch (error) {
     console.error('Error updating prices:', error)
+  } finally {
+    updating.value = false
+  }
+}
+
+const updateAllNavs = async () => {
+  updating.value = true
+  try {
+    await mutualFundApi.updateAllNavs()
+    await loadData()
+  } catch (error) {
+    console.error('Error updating NAVs:', error)
   } finally {
     updating.value = false
   }
@@ -139,6 +157,76 @@ const otherHoldings = computed(() =>
   consolidatedHoldings.value.filter(h => h.currency && h.currency !== 'INR' && h.currency !== 'USD')
 )
 
+// Mutual fund consolidated holdings (grouped by fund, expandable per account).
+// Uses a namespaced key (fund_id + 'mf') to avoid colliding with equity stock ids.
+const consolidatedMfHoldings = computed<ConsolidatedHolding[]>(() => {
+  let filtered = mfHoldings.value
+
+  if (selectedAccountId.value) {
+    filtered = filtered.filter(h => h.account_id === selectedAccountId.value)
+  }
+
+  const map = new Map<number, ConsolidatedHolding>()
+
+  for (const h of filtered) {
+    if (!map.has(h.fund_id)) {
+      map.set(h.fund_id, {
+        stock_id: h.fund_id,
+        stock_symbol: h.fund_name,
+        stock_name: h.category || h.amc || 'Mutual Fund',
+        currency: h.currency || 'INR',
+        current_price: h.current_price,
+        quantity: 0,
+        average_price: 0,
+        invested_value: 0,
+        current_value: 0,
+        gain_loss: 0,
+        gain_loss_percentage: 0,
+        sub_holdings: []
+      })
+    }
+    const entry = map.get(h.fund_id)!
+    entry.quantity += h.quantity
+    entry.invested_value += h.invested_value
+    entry.current_value += h.current_value
+    entry.gain_loss += h.gain_loss
+    entry.sub_holdings.push(h as unknown as Holding)
+  }
+
+  for (const entry of map.values()) {
+    entry.average_price = entry.quantity > 0 ? entry.invested_value / entry.quantity : 0
+    entry.gain_loss_percentage = entry.invested_value > 0 ? (entry.gain_loss / entry.invested_value) * 100 : 0
+  }
+
+  return Array.from(map.values())
+})
+
+// Combined Indian (INR) portfolio = equity INR + mutual funds
+const combinedInrSummary = computed(() => {
+  const equity = summary.value?.by_currency?.INR
+  const mf = mfSummary.value
+
+  const equityInvested = equity?.total_invested ?? 0
+  const equityCurrent = equity?.total_current_value ?? 0
+  const mfInvested = mf?.total_invested ?? 0
+  const mfCurrent = mf?.total_current_value ?? 0
+
+  const totalInvested = equityInvested + mfInvested
+  const totalCurrent = equityCurrent + mfCurrent
+  const gainLoss = totalCurrent - totalInvested
+
+  return {
+    total_invested: totalInvested,
+    total_current_value: totalCurrent,
+    total_gain_loss: gainLoss,
+    total_gain_loss_percentage: totalInvested > 0 ? (gainLoss / totalInvested) * 100 : 0,
+    equity_holdings_count: equity?.holdings_count ?? 0,
+    mf_holdings_count: mf?.holdings_count ?? 0,
+  }
+})
+
+const sortedMfHoldings = computed(() => sortHoldings(consolidatedMfHoldings.value))
+
 const sortHoldings = (list: ConsolidatedHolding[]) => {
   const sorted = [...list]
   sorted.sort((a, b) => {
@@ -204,6 +292,9 @@ onMounted(() => {
         <button @click="updateAllPrices" :disabled="updating" class="btn-primary">
           {{ updating ? 'Updating...' : 'Update Prices' }}
         </button>
+        <button @click="updateAllNavs" :disabled="updating" class="btn-primary">
+          {{ updating ? 'Updating...' : 'Update NAVs' }}
+        </button>
         <router-link to="/corporate-events" class="btn-primary">Corporate Actions</router-link>
       </div>
     </div>
@@ -226,6 +317,19 @@ onMounted(() => {
             ({{ cur.total_gain_loss_percentage.toFixed(2) }}%)
           </p>
           <p class="sub-label">Invested: {{ formatCurrency(cur.total_invested, code) }}</p>
+        </div>
+        <!-- Combined Indian portfolio (equity + mutual funds) -->
+        <div v-if="combinedInrSummary.total_invested > 0" class="card currency-card combined-card">
+          <h3>🇮🇳 Combined INR Portfolio</h3>
+          <p class="value">{{ formatCurrency(combinedInrSummary.total_current_value, 'INR') }}</p>
+          <p class="sub-value" :class="getGainLossClass(combinedInrSummary.total_gain_loss)">
+            {{ formatCurrency(combinedInrSummary.total_gain_loss, 'INR') }}
+            ({{ combinedInrSummary.total_gain_loss_percentage.toFixed(2) }}%)
+          </p>
+          <p class="sub-label">
+            Invested: {{ formatCurrency(combinedInrSummary.total_invested, 'INR') }}
+            · {{ combinedInrSummary.equity_holdings_count }} stocks + {{ combinedInrSummary.mf_holdings_count }} funds
+          </p>
         </div>
       </div>
 
@@ -251,25 +355,49 @@ onMounted(() => {
         </div>
       </div>
 
-      <div v-if="holdings.length === 0" class="empty-state">
+      <div v-if="holdings.length === 0 && mfHoldings.length === 0" class="empty-state">
         <p>No holdings yet. Add transactions to see your portfolio.</p>
         <router-link to="/transactions" class="btn-primary">Add Transaction</router-link>
       </div>
 
       <template v-else>
         <!-- INR section -->
-        <div v-if="sortedInrHoldings.length > 0" class="holdings-section">
+        <div v-if="sortedInrHoldings.length > 0 || sortedMfHoldings.length > 0" class="holdings-section">
           <h2>🇮🇳 Indian Portfolio <span class="currency-badge">INR</span></h2>
-          <HoldingsTable
-            :holdings="sortedInrHoldings"
-            currency="INR"
-            :sort-by="sortBy"
-            :sort-direction="sortDirection"
-            :expanded-stocks="expandedStocks"
-            @sort="setSortBy"
-            @toggle-expand="toggleExpand"
-            :get-gain-loss-class="getGainLossClass"
-          />
+
+          <!-- Equity sub-section -->
+          <div v-if="sortedInrHoldings.length > 0" class="asset-subsection">
+            <h3 class="asset-heading">Equity <span class="asset-count">{{ sortedInrHoldings.length }} holdings</span></h3>
+            <HoldingsTable
+              :holdings="sortedInrHoldings"
+              currency="INR"
+              :sort-by="sortBy"
+              :sort-direction="sortDirection"
+              :expanded-stocks="expandedStocks"
+              @sort="setSortBy"
+              @toggle-expand="toggleExpand"
+              :get-gain-loss-class="getGainLossClass"
+            />
+          </div>
+
+          <!-- Mutual fund sub-section -->
+          <div v-if="sortedMfHoldings.length > 0" class="asset-subsection">
+            <h3 class="asset-heading">Mutual Funds <span class="asset-count">{{ sortedMfHoldings.length }} funds</span></h3>
+            <HoldingsTable
+              :holdings="sortedMfHoldings"
+              currency="INR"
+              :sort-by="sortBy"
+              :sort-direction="sortDirection"
+              :expanded-stocks="expandedStocks"
+              @sort="setSortBy"
+              @toggle-expand="toggleExpand"
+              :get-gain-loss-class="getGainLossClass"
+              name-label="Scheme"
+              quantity-label="Units"
+              avg-label="Avg NAV"
+              current-label="Current NAV"
+            />
+          </div>
         </div>
 
         <!-- USD section -->
@@ -322,7 +450,7 @@ onMounted(() => {
 
 h1 {
   font-size: 2rem;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .btn-primary {
@@ -349,7 +477,7 @@ h1 {
   text-align: center;
   padding: 2rem;
   font-size: 1.2rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .summary-cards {
@@ -360,7 +488,7 @@ h1 {
 }
 
 .card {
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -369,7 +497,7 @@ h1 {
 .card h3 {
   margin: 0 0 0.5rem 0;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--text-secondary);
   font-weight: 500;
   text-transform: uppercase;
 }
@@ -378,7 +506,7 @@ h1 {
   margin: 0;
   font-size: 1.8rem;
   font-weight: bold;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .currency-card .sub-value {
@@ -390,7 +518,7 @@ h1 {
 .currency-card .sub-label {
   margin: 0.2rem 0 0;
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-secondary);
 }
 
 .currency-badge {
@@ -405,6 +533,31 @@ h1 {
   margin-left: 0.4rem;
 }
 
+.combined-card {
+  border: 2px solid #42b983;
+}
+
+.asset-subsection {
+  margin-bottom: 1.5rem;
+}
+
+.asset-subsection:last-child {
+  margin-bottom: 0;
+}
+
+.asset-heading {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.asset-count {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-left: 0.5rem;
+}
+
 .positive {
   color: #42b983;
 }
@@ -414,11 +567,11 @@ h1 {
 }
 
 .neutral {
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .holdings-section {
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 2rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -426,7 +579,7 @@ h1 {
 
 .holdings-section h2 {
   margin: 0 0 1.5rem 0;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .filter-section {
@@ -434,7 +587,7 @@ h1 {
   gap: 1rem;
   margin-bottom: 1.5rem;
   padding: 1rem;
-  background-color: #f8f9fa;
+  background-color: var(--bg-secondary);
   border-radius: 4px;
 }
 
@@ -447,12 +600,12 @@ h1 {
 .filter-section label {
   font-weight: 500;
   margin-bottom: 0.5rem;
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .filter-section select {
   padding: 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 0.95rem;
 }
@@ -460,7 +613,7 @@ h1 {
 .empty-state {
   text-align: center;
   padding: 3rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .empty-state p {
@@ -481,9 +634,9 @@ h1 {
 }
 
 .holdings-table th {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary);
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary);
   font-size: 0.9rem;
   text-transform: uppercase;
 }
@@ -495,7 +648,7 @@ h1 {
 }
 
 .holdings-table th.sortable:hover {
-  background-color: #e8e8e8;
+  background-color: var(--table-hover);
 }
 
 .sort-indicator {
@@ -506,7 +659,7 @@ h1 {
 }
 
 .holdings-table tbody tr:hover {
-  background-color: #f9f9f9;
+  background-color: var(--table-hover);
 }
 
 .consolidated-row {
@@ -514,11 +667,11 @@ h1 {
 }
 
 .consolidated-row:hover {
-  background-color: #f0f7f4 !important;
+  background-color: var(--table-hover) !important;
 }
 
 .consolidated-row.expanded {
-  background-color: #e8f5ee;
+  background-color: var(--table-hover);
 }
 
 .expand-chevron {
@@ -530,17 +683,17 @@ h1 {
 }
 
 .sub-row {
-  background-color: #fafafa;
+  background-color: var(--bg-tertiary);
 }
 
 .sub-row:hover {
-  background-color: #f0f0f0 !important;
+  background-color: var(--table-hover) !important;
 }
 
 .sub-row td {
   font-size: 0.9rem;
-  color: #555;
-  border-bottom: 1px solid #efefef;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .sub-account-cell {
@@ -553,11 +706,11 @@ h1 {
 }
 
 .holdings-table td strong {
-  color: #2c3e50;
+  color: var(--text-primary);
 }
 
 .holdings-table td small {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.85rem;
 }
 </style>

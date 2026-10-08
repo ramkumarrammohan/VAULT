@@ -1,0 +1,5 @@
+account,fund,transaction_type,quantity,nav,amount,transaction_date,fees,notes,transfer_to_account
+My Account,HDFC Mid-Cap Opportunities Fund - Direct - Growth,BUY,50,245.6789,,2024-01-15,0,SIP purchase,
+My Account,HDFC Mid-Cap Opportunities Fund - Direct - Growth,BUY,,,5000,2024-02-15,0,Amount-only SIP (units auto-computed),
+My Account,HDFC Mid-Cap Opportunities Fund - Direct - Growth,SELL,10,,,2024-06-01,0,Partial redemption,
+Account 1,HDFC Mid-Cap Opportunities Fund - Direct - Growth,TRANSFER,20,,,2024-07-01,0,Transfer between accounts,Account 2
