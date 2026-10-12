@@ -45,7 +45,10 @@ export const portfolioApi = {
 // Prices API
 export const priceApi = {
   updatePrice: (symbol: string) => apiClient.post(`/prices/update/${symbol}`),
-  updateAllPrices: () => apiClient.post('/prices/update-all')
+  updateAllPrices: () => apiClient.post('/prices/update-all'),
+  // NSE bhavcopy sync (runs in the automation service, proxied by the backend)
+  syncBhavcopy: (data?: { date?: string }) => apiClient.post('/prices/sync-bhavcopy', data ?? {}),
+  syncBhavcopyStatus: () => apiClient.get('/prices/sync-bhavcopy/status')
 }
 
 // Transactions API

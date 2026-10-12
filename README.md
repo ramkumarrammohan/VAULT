@@ -63,6 +63,45 @@ A personal portfolio tracker application for managing stock holdings across mult
    npm run dev
    ```
 
+## Automation — NSE Bhavcopy Price Sync (local, Stage 1)
+
+The `automation/` service downloads the latest NSE bhavcopy (the previous
+trading day's end-of-day prices) and pushes the close price of every tracked
+INR stock into Vault via the backend API. USD stocks are unaffected and keep
+using Yahoo Finance.
+
+### Setup
+
+```powershell
+cd automation
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### Run (3 terminals, like the backend/frontend)
+
+1. Backend: `cd backend; flask run` (port 5000)
+2. Automation: `cd automation; python -m automation.app` (port 8080)
+3. Frontend: `cd frontend; npm run dev` (port 5173)
+
+Then click **"Sync NSE (Bhavcopy)"** on the Portfolio Dashboard, or run once
+from the terminal:
+
+```powershell
+cd automation
+python -m automation.cli --once                          # latest bhavcopy
+python -m automation.cli --once --date 2026-10-10        # specific trading day
+```
+
+Configuration (environment variables): `BACKEND_URL` (default
+`http://localhost:5000/api`), `AUTOMATION_PORT` (default `8080`),
+`MAX_LOOKBACK_DAYS`, `BULK_MODE`, `EQUITY_SERIES`, `ARTIFACTS_DIR`. See
+`automation/README.md`.
+
+> Stage 2 wraps this service in a Docker container (see the plan) — the HTTP
+> contract is identical, so no code changes are needed.
+
 ## Docker — Production Deployment
 
 ### 1. Build & Push Images (local machine)

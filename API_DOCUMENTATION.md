@@ -307,6 +307,109 @@ GET /api/prices/fetch/TSLA
 }
 ```
 
+### Bulk Price Update (external sources)
+
+```http
+POST /api/prices/bulk
+```
+
+Applies a batch of prices supplied by an external source (e.g. the NSE bhavcopy
+sync). It does **not** call Yahoo Finance.
+
+Behaviour:
+- Symbols are matched case-insensitively and are suffix-agnostic, so
+  `RELIANCE` and `RELIANCE.NS` both match the stored stock.
+- Only **INR** stocks are updated. USD stocks are returned under `skipped`.
+- For `"source": "nse-bhavcopy"`, stocks that are not NSE (e.g. `.BO`-only or
+  a BSE exchange) are skipped with reason `exchange-mismatch`.
+- Unknown symbols are reported under `unmatched` and ignored.
+
+**Request:**
+```json
+{
+  "source": "nse-bhavcopy",
+  "date": "2026-10-10",
+  "prices": [
+    { "symbol": "RELIANCE", "price": 2450.50 },
+    { "symbol": "TCS.NS", "price": 3567.20 }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "source": "nse-bhavcopy",
+  "date": "2026-10-10",
+  "received": 2,
+  "updated": ["RELIANCE.NS", "TCS.NS"],
+  "skipped": [],
+  "unmatched": [],
+  "malformed": [],
+  "updated_count": 2,
+  "skipped_count": 0,
+  "unmatched_count": 0
+}
+```
+
+### Trigger NSE Bhavcopy Sync
+
+```http
+POST /api/prices/sync-bhavcopy
+```
+
+Proxies a manual sync request to the automation service. Runs in the
+background; use the status endpoint to follow progress.
+
+**Request (all fields optional):**
+```json
+{ "date": "2026-10-10" }
+```
+
+**Response (202 Accepted):**
+```json
+{
+  "status": "started",
+  "current_job": "bhavcopy",
+  "started_at": "2026-10-11T13:00:00Z",
+  "runs": 0
+}
+```
+
+Returns **409** if a sync is already running and **503** when the automation
+service is not reachable.
+
+### NSE Bhavcopy Sync Status
+
+```http
+GET /api/prices/sync-bhavcopy/status
+```
+
+**Response:**
+```json
+{
+  "job": "bhavcopy",
+  "status": "success",
+  "current_job": "bhavcopy",
+  "started_at": "2026-10-11T13:00:00Z",
+  "finished_at": "2026-10-11T13:00:04Z",
+  "error": null,
+  "runs": 1,
+  "last_report": {
+    "job": "bhavcopy",
+    "status": "success",
+    "trading_date": "2026-10-10",
+    "bulk_mode": "matched",
+    "watchlist_symbols": 8,
+    "bhavcopy_rows": 2413,
+    "sent_symbols": 4,
+    "backend": { "updated_count": 4, "skipped_count": 0, "unmatched_count": 0 }
+  }
+}
+```
+
+`status` is one of `idle`, `running`, `success` or `error`.
+
 ---
 
 ## Stock Symbol Formats

@@ -1,0 +1,11 @@
+# Stage 1 - local manual run (python -m automation.app / python -m automation.cli)
+Flask==3.0.0
+requests==2.32.3
+pandas>=2.2.0
+
+# Provides the IANA timezone database used by zoneinfo on minimal systems
+# (python:3.12-slim in the Stage 2 container, and some Windows Python builds).
+tzdata>=2024.1
+
+# Stage 2 will add:
+# APScheduler==3.10.4

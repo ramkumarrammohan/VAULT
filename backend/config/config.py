@@ -19,6 +19,11 @@ class Config:
     # API configuration
     API_PREFIX = os.environ.get('API_PREFIX', '/api')
 
+    # Automation sidecar (NSE bhavcopy sync etc.)
+    # Stage 1 (local dev): http://localhost:8080
+    # Stage 2 (docker compose): http://automation:8080
+    AUTOMATION_URL = os.environ.get('AUTOMATION_URL', 'http://localhost:8080')
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""

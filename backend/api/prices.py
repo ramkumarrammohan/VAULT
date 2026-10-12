@@ -1,15 +1,51 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.stock import Stock
 import yfinance as yf
 from datetime import datetime, timedelta
 import time
+import requests
 
 bp = Blueprint('prices', __name__)
 
 # Simple cooldown tracker - prevents too frequent updates
 last_update_times = {}
 COOLDOWN_SECONDS = 60  # 1 minute cooldown between updates for same stock
+
+# Exchanges whose stocks are priced in INR (i.e. eligible for NSE bhavcopy sync)
+_INR_EXCHANGES = {'NSE', 'BSE'}
+
+
+def _base_symbol(symbol: str) -> str:
+    """Upper-case a symbol and strip Yahoo exchange suffixes (.NS/.BO).
+
+    Bhavcopy uses plain NSE codes (RELIANCE) while the DB stores Yahoo-style
+    symbols (RELIANCE.NS), so both sides are compared on the base symbol.
+    """
+    sym = (symbol or '').strip().upper()
+    for suffix in ('.NS', '.BO'):
+        if sym.endswith(suffix):
+            return sym[: -len(suffix)]
+    return sym
+
+
+def _is_inr_stock(stock: Stock) -> bool:
+    """True when the stock's price is denominated in INR."""
+    if (stock.currency or '').upper() == 'INR':
+        return True
+    return (stock.exchange or '').upper() in _INR_EXCHANGES
+
+
+def _is_nse_stock(stock: Stock) -> bool:
+    """True when the stock is listed on NSE (safe to apply NSE bhavcopy)."""
+    exchange = (stock.exchange or '').upper()
+    if exchange:
+        return exchange == 'NSE'
+    return (stock.symbol or '').upper().endswith('.NS')
+
+
+def _automation_url() -> str:
+    return (current_app.config.get('AUTOMATION_URL') or '').rstrip('/')
 
 def fetch_current_price(symbol: str):
     """Fetch the current stock price from Yahoo Finance"""
@@ -216,3 +252,139 @@ def fetch_stock_info(symbol):
             return jsonify({'error': 'Unable to connect to price service. Please try again later.'}), 503
         else:
             return jsonify({'error': f'Failed to fetch stock info: {error_msg}'}), 500
+
+
+@bp.route('/bulk', methods=['POST'])
+def bulk_update_prices():
+    """Update prices in bulk from an external source (e.g. NSE bhavcopy).
+
+    This endpoint does NOT call Yahoo Finance - it simply applies the prices
+    supplied by the caller. Only INR-denominated stocks are updated so that USD
+    tickers (which may share a symbol with an Indian listing) are never touched.
+
+    Request body:
+        {
+          "source": "nse-bhavcopy",
+          "date": "2026-10-10",
+          "prices": [
+            {"symbol": "RELIANCE", "price": 2450.5},
+            {"symbol": "TCS.NS",   "price": 3567.2}
+          ]
+        }
+    """
+    data = request.get_json(silent=True) or {}
+    prices = data.get('prices')
+
+    if not isinstance(prices, list) or not prices:
+        return jsonify({'error': "'prices' must be a non-empty list"}), 400
+
+    source = (data.get('source') or 'unknown').strip().lower()
+    report_date = data.get('date')
+
+    # base symbol -> [Stock, ...] (suffix-agnostic: RELIANCE / RELIANCE.NS)
+    lookup = {}
+    for stock in Stock.query.all():
+        lookup.setdefault(_base_symbol(stock.symbol), []).append(stock)
+
+    # Collapse duplicate rows from the source (last one wins)
+    incoming = {}
+    malformed = []
+    for item in prices:
+        if not isinstance(item, dict):
+            malformed.append(str(item))
+            continue
+        symbol = item.get('symbol')
+        price = item.get('price')
+        if symbol is None or price is None:
+            malformed.append(str(item))
+            continue
+        base = _base_symbol(str(symbol))
+        if not base:
+            malformed.append(str(symbol))
+            continue
+        incoming[base] = (symbol, price)
+
+    updated, skipped, unmatched = [], [], []
+
+    for base, (raw_symbol, raw_price) in incoming.items():
+        try:
+            price = round(float(raw_price), 2)
+        except (TypeError, ValueError):
+            skipped.append({'symbol': raw_symbol, 'reason': 'invalid-price'})
+            continue
+
+        candidates = lookup.get(base)
+        if not candidates:
+            unmatched.append(raw_symbol)
+            continue
+
+        for stock in candidates:
+            if not _is_inr_stock(stock):
+                skipped.append({'symbol': stock.symbol, 'reason': 'non-INR'})
+                continue
+            if source == 'nse-bhavcopy' and not _is_nse_stock(stock):
+                skipped.append({'symbol': stock.symbol, 'reason': 'exchange-mismatch'})
+                continue
+            stock.current_price = price
+            stock.last_updated = datetime.utcnow()
+            updated.append(stock.symbol)
+
+    db.session.commit()
+
+    return jsonify({
+        'source': source,
+        'date': report_date,
+        'received': len(prices),
+        'updated': updated,
+        'skipped': skipped,
+        'unmatched': unmatched,
+        'malformed': malformed,
+        'updated_count': len(updated),
+        'skipped_count': len(skipped),
+        'unmatched_count': len(unmatched),
+    }), 200
+
+
+@bp.route('/sync-bhavcopy', methods=['POST'])
+def trigger_bhavcopy_sync():
+    """Proxy a manual NSE bhavcopy sync request to the automation service.
+
+    Keeps the browser talking only to the backend; the automation container is
+    never exposed directly. Returns the automation service response as-is.
+    """
+    base = _automation_url()
+    if not base:
+        return jsonify({'error': 'Automation service is not configured'}), 503
+
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        resp = requests.post(f'{base}/jobs/bhavcopy/run', json=payload, timeout=15)
+    except requests.RequestException as exc:
+        return jsonify({
+            'error': 'Automation service unavailable. Is it running?',
+            'detail': str(exc),
+            'hint': 'Stage 1: start it with "python -m automation.app" (port 8080).',
+        }), 503
+
+    return (resp.text, resp.status_code,
+            {'Content-Type': resp.headers.get('Content-Type', 'application/json')})
+
+
+@bp.route('/sync-bhavcopy/status', methods=['GET'])
+def bhavcopy_sync_status():
+    """Proxy the NSE bhavcopy sync job status from the automation service."""
+    base = _automation_url()
+    if not base:
+        return jsonify({'error': 'Automation service is not configured'}), 503
+
+    try:
+        resp = requests.get(f'{base}/jobs/bhavcopy/status', timeout=15)
+    except requests.RequestException as exc:
+        return jsonify({
+            'error': 'Automation service unavailable. Is it running?',
+            'detail': str(exc),
+        }), 503
+
+    return (resp.text, resp.status_code,
+            {'Content-Type': resp.headers.get('Content-Type', 'application/json')})

@@ -17,6 +17,9 @@ const sortBy = ref<string>('stock_symbol')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const updating = ref(false)
+const syncingBhavcopy = ref(false)
+const syncNotice = ref<string | null>(null)
+const syncError = ref<string | null>(null)
 const expandedStocks = ref<Set<number>>(new Set())
 
 const loadAccounts = async () => {
@@ -62,6 +65,67 @@ const updateAllPrices = async () => {
     console.error('Error updating prices:', error)
   } finally {
     updating.value = false
+  }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// The automation service runs the sync in the background; poll until it settles.
+const waitForBhavcopySync = async (maxAttempts = 60) => {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await sleep(2000)
+    const { data } = await priceApi.syncBhavcopyStatus()
+    if (data.status !== 'running') {
+      return data
+    }
+  }
+  return null
+}
+
+interface BulkReport {
+  updated_count?: number
+  skipped_count?: number
+  unmatched_count?: number
+}
+
+const syncBhavcopy = async () => {
+  syncingBhavcopy.value = true
+  syncNotice.value = null
+  syncError.value = null
+
+  try {
+    await priceApi.syncBhavcopy()
+    const finalState = await waitForBhavcopySync()
+
+    if (!finalState) {
+      syncError.value = 'Sync is still running. Check the automation service logs for progress.'
+      return
+    }
+
+    if (finalState.status === 'error') {
+      syncError.value = finalState.error || 'NSE bhavcopy sync failed'
+      return
+    }
+
+    const report = finalState.last_report
+    const backend: BulkReport | null = report?.backend ?? null
+    const date = report?.trading_date ? ` ${report.trading_date}` : ''
+
+    if (!backend) {
+      syncNotice.value = `NSE bhavcopy${date}: no tracked symbols found to update.`
+    } else {
+      syncNotice.value =
+        `NSE bhavcopy${date}: ${backend.updated_count ?? 0} updated, ` +
+        `${backend.skipped_count ?? 0} skipped, ${backend.unmatched_count ?? 0} unmatched.`
+    }
+    await loadData()
+  } catch (error: any) {
+    const data = error.response?.data
+    syncError.value =
+      data?.error || data?.detail || 'Failed to start the NSE bhavcopy sync.'
+    console.error('Error syncing NSE bhavcopy:', error)
+  } finally {
+    syncingBhavcopy.value = false
   }
 }
 
@@ -204,9 +268,20 @@ onMounted(() => {
         <button @click="updateAllPrices" :disabled="updating" class="btn-primary">
           {{ updating ? 'Updating...' : 'Update Prices' }}
         </button>
+        <button
+          @click="syncBhavcopy"
+          :disabled="syncingBhavcopy"
+          class="btn-primary"
+          title="Download the latest NSE bhavcopy and sync INR stock prices"
+        >
+          {{ syncingBhavcopy ? 'Syncing NSE...' : 'Sync NSE (Bhavcopy)' }}
+        </button>
         <router-link to="/corporate-events" class="btn-primary">Corporate Actions</router-link>
       </div>
     </div>
+
+    <div v-if="syncNotice" class="sync-notice">{{ syncNotice }}</div>
+    <div v-if="syncError" class="sync-error">{{ syncError }}</div>
 
     <div v-if="loading" class="loading">Loading...</div>
 
@@ -343,6 +418,26 @@ h1 {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.sync-notice,
+.sync-error {
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.sync-notice {
+  background-color: #e8f7f0;
+  border: 1px solid #42b983;
+  color: #2c6e52;
+}
+
+.sync-error {
+  background-color: #fdecea;
+  border: 1px solid #e57373;
+  color: #a3312a;
 }
 
 .loading {
