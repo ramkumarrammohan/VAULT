@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 
 const isDark = ref(false)
+const appVersion = __APP_VERSION__
 
 const toggleTheme = () => {
   isDark.value = !isDark.value
@@ -29,7 +30,10 @@ onMounted(() => {
   <div id="app">
     <nav class="navbar">
       <div class="container">
-        <router-link to="/" class="logo">Portfolio Tracker</router-link>
+        <router-link to="/" class="logo">
+          Portfolio Tracker
+          <span v-if="appVersion" class="version-badge">v{{ appVersion }}</span>
+        </router-link>
         <div class="nav-links">
           <router-link to="/">Dashboard</router-link>
           <router-link to="/accounts">Accounts</router-link>
@@ -132,6 +136,19 @@ body {
   font-weight: bold;
   color: var(--navbar-text);
   text-decoration: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.version-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  /* theme.css applies `span { color: var(--text-primary) !important }`, which is
+     invisible on the navbar in light theme — force the navbar text color instead. */
+  color: var(--navbar-text) !important;
+  letter-spacing: 0.02em;
 }
 
 .nav-links {
