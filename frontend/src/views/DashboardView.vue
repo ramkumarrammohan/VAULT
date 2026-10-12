@@ -1,9 +1,16 @@
 <script setup lang="ts">
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { portfolioApi, priceApi, accountApi, stockApi } from '@/services/api'
 import type { PortfolioSummary, Holding, Account, Stock, ConsolidatedHolding } from '@/types'
 import { formatCurrency } from '@/utils/currency'
+import {
+  buildHoldingsCsv,
+  buildHoldingsExcelXml,
+  buildHoldingsFilename,
+  downloadFile,
+  type HoldingsExportSection
+} from '@/utils/holdingsExport'
 import HoldingsTable from '@/components/HoldingsTable.vue'
 
 
@@ -18,6 +25,8 @@ const sortDirection = ref<'asc' | 'desc'>('asc')
 const loading = ref(false)
 const updating = ref(false)
 const expandedStocks = ref<Set<number>>(new Set())
+const showDownloadMenu = ref(false)
+const downloadMenuRef = ref<HTMLElement | null>(null)
 
 const loadAccounts = async () => {
   try {
@@ -188,10 +197,67 @@ const setSortBy = (column: string) => {
   }
 }
 
+// Everything currently rendered, in the same order as the on-screen sections
+const exportSections = computed<HoldingsExportSection[]>(() => {
+  const sections: HoldingsExportSection[] = []
+  if (sortedInrHoldings.value.length > 0) {
+    sections.push({ label: 'INR', currency: 'INR', holdings: sortedInrHoldings.value })
+  }
+  if (sortedUsdHoldings.value.length > 0) {
+    sections.push({ label: 'USD', currency: 'USD', holdings: sortedUsdHoldings.value })
+  }
+  if (sortedOtherHoldings.value.length > 0) {
+    sections.push({
+      label: 'Other',
+      currency: sortedOtherHoldings.value[0]?.currency ?? 'USD',
+      holdings: sortedOtherHoldings.value
+    })
+  }
+  return sections
+})
+
+const hasHoldings = computed(() => consolidatedHoldings.value.length > 0)
+
+const exportFilters = computed(() => ({
+  account: accounts.value.find((a) => a.id === selectedAccountId.value)?.name,
+  stock: stocks.value.find((s) => s.id === selectedStockId.value)?.symbol
+}))
+
+const downloadCsv = () => {
+  const csv = buildHoldingsCsv(exportSections.value, expandedStocks.value)
+  downloadFile(
+    csv,
+    buildHoldingsFilename('csv', exportFilters.value),
+    'text/csv;charset=utf-8;'
+  )
+  showDownloadMenu.value = false
+}
+
+const downloadExcel = () => {
+  const xml = buildHoldingsExcelXml(exportSections.value, expandedStocks.value)
+  downloadFile(
+    xml,
+    buildHoldingsFilename('xls', exportFilters.value),
+    'application/vnd.ms-excel'
+  )
+  showDownloadMenu.value = false
+}
+
+const handleClickOutside = (event: MouseEvent) => {
+  if (downloadMenuRef.value && !downloadMenuRef.value.contains(event.target as Node)) {
+    showDownloadMenu.value = false
+  }
+}
+
 onMounted(() => {
   loadAccounts()
   loadStocks()
   loadData()
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -201,6 +267,19 @@ onMounted(() => {
     <div class="header">
       <h1>Portfolio Dashboard</h1>
       <div style="display: flex; gap: 1rem; align-items: center;">
+        <div class="download-dropdown" ref="downloadMenuRef">
+          <button
+            class="btn-primary"
+            :disabled="!hasHoldings"
+            @click="showDownloadMenu = !showDownloadMenu"
+          >
+            Download ▾
+          </button>
+          <div v-if="showDownloadMenu" class="download-menu">
+            <button type="button" @click="downloadCsv">Download as CSV</button>
+            <button type="button" @click="downloadExcel">Download as Excel</button>
+          </div>
+        </div>
         <button @click="updateAllPrices" :disabled="updating" class="btn-primary">
           {{ updating ? 'Updating...' : 'Update Prices' }}
         </button>
@@ -343,6 +422,42 @@ h1 {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.download-dropdown {
+  position: relative;
+}
+
+.download-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 190px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 0.35rem;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}
+
+.download-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: #2c3e50;
+  white-space: nowrap;
+}
+
+.download-menu button:hover {
+  background-color: #f0f7f4;
+  color: #359268;
 }
 
 .loading {
